@@ -1,0 +1,27 @@
+{
+  "name": "Café con RS | Bitácora",
+  "short_name": "Café con RS",
+  "description": "Bitácora de acompañamiento psicológico con registro de ánimo, chat de IA y reportes terapéuticos.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FAFAFA",
+  "theme_color": "#6B8E23",
+  "categories": ["health", "lifestyle", "productivity"],
+  "lang": "es",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
