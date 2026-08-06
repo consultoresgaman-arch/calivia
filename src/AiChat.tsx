@@ -329,6 +329,23 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
 
       let finalTranscript = '';
 
+      // Puente nativo de audio: en algunos dispositivos Android el motor de
+      // reconocimiento se queda "escuchando" en silencio para siempre sin
+      // disparar ni onresult ni onerror ni onend (p. ej. si el servicio de
+      // reconocimiento del sistema no responde). Sin este vigía, el botón
+      // quedaría atrapado indefinidamente en el estado de grabación.
+      const watchdog = window.setTimeout(() => {
+        console.error('[Calivia] SpeechRecognition no dio señales de vida a tiempo; forzando detención.');
+        try { recognition.stop(); } catch { /* ignore */ }
+        setError('El micrófono no respondió. Verifica que el servicio de reconocimiento de voz de tu dispositivo esté activo e intenta de nuevo.');
+        setRecording(false);
+        recognitionRef.current = null;
+      }, 10000);
+
+      (recognition as any).onstart = () => {
+        console.info('[Calivia] SpeechRecognition: sesión iniciada correctamente.');
+      };
+
       recognition.onresult = (e: SpeechRecognitionEvent) => {
         let interim = '';
         for (let i = 0; i < e.results.length; i++) {
@@ -348,6 +365,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       recognition.onerror = (e: Event) => {
         const errEvent = e as any;
         console.error('[Calivia] SpeechRecognition onerror:', errEvent.error);
+        window.clearTimeout(watchdog);
         if (errEvent.error === 'not-allowed' || errEvent.error === 'service-not-allowed') {
           setError('No se pudo acceder al micrófono. Revisa los permisos del navegador.');
         } else if (errEvent.error !== 'no-speech' && errEvent.error !== 'aborted') {
@@ -358,6 +376,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       };
 
       recognition.onend = () => {
+        window.clearTimeout(watchdog);
         setRecording(false);
         recognitionRef.current = null;
         const textToSend = finalTranscript.trim();
