@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, CalendarClock } from 'lucide-react';
+import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, CalendarClock, CloudRain } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useAuth } from './lib/auth';
 import AiChat from './AiChat';
@@ -8,11 +8,12 @@ import SosModal from './SosModal';
 import DisconnectionZone from './DisconnectionZone';
 import WeeklyProgress from './WeeklyProgress';
 import TaskManager from './TaskManager';
+import SoundGallery from './SoundGallery';
 
 const MAX_FREE_MESSAGES = 20;
 const CALENDLY_URL = 'https://calendly.com/consultoresgaman/30min';
 
-type Section = 'chat' | 'breathe' | 'games' | 'progress' | 'tasks';
+type Section = 'chat' | 'breathe' | 'games' | 'progress' | 'tasks' | 'sounds';
 
 interface Props {
   onExitToHome?: () => void;
@@ -112,6 +113,9 @@ export default function PatientDashboard({ onExitToHome }: Props) {
           <button className={`stab ${section === 'tasks' ? 'active' : ''}`} onClick={() => setSection('tasks')} type="button">
             <CheckSquare size={16} strokeWidth={2} /><span>Tareas</span>
           </button>
+          <button className={`stab ${section === 'sounds' ? 'active' : ''}`} onClick={() => setSection('sounds')} type="button">
+            <CloudRain size={16} strokeWidth={2} /><span>Sonidos</span>
+          </button>
         </div>
 
         {section === 'chat' && (
@@ -156,6 +160,12 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         {section === 'tasks' && (
           <div className="progress-section anim-fade">
             <TaskManager userId={profile!.id} />
+          </div>
+        )}
+
+        {section === 'sounds' && (
+          <div className="progress-section anim-fade">
+            <SoundGallery isPremium={isPremium} userId={profile!.id} name={profile?.full_name} />
           </div>
         )}
       </main>

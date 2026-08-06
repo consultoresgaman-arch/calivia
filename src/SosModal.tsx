@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Phone, UserPlus, Trash2, Volume2, VolumeX, Vibrate, ArrowLeft } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { Haptics } from '@capacitor/haptics';
 import { CRISIS_LINES } from './lib/crisis';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
@@ -9,11 +11,12 @@ interface Props {
   onClose: () => void;
 }
 
-// Un latido: lub, pausa corta, dub, descanso largo (~70 lpm). Se repite muchas
-// veces para que la vibración no se corte mientras la persona sostiene el dedo.
-const HEARTBEAT_CYCLE = [90, 100, 120, 700];
-const HEARTBEAT_PATTERN = Array(200).fill(HEARTBEAT_CYCLE).flat();
-const VIBRATION_SUPPORTED = typeof navigator !== 'undefined' && 'vibrate' in navigator;
+// Un latido: lub, pausa corta, dub, descanso largo (~70 lpm). Se dispara con
+// el plugin nativo Haptics en vez de navigator.vibrate() porque el WebView
+// de Android no implementa la Vibration API de forma confiable.
+const HEARTBEAT_CYCLE = { lub: 90, gapAfterLub: 100, dub: 120, rest: 700 };
+const VIBRATION_LIKELY_SUPPORTED =
+  Capacitor.isNativePlatform() || (typeof navigator !== 'undefined' && 'vibrate' in navigator);
 
 interface TrustedContact {
   id: string;
@@ -48,6 +51,8 @@ export default function SosModal({ open, onClose }: Props) {
 
   const [groundingActive, setGroundingActive] = useState(false);
   const [vibrating, setVibrating] = useState(false);
+  const vibrationActiveRef = useRef(false);
+  const vibrationTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => { setCountry(profile?.country ?? ''); }, [profile?.country]);
 
@@ -159,17 +164,34 @@ export default function SosModal({ open, onClose }: Props) {
     else { startAmbientAudio(); setAudioOn(true); }
   }
 
+  function scheduleVibration(delay: number, next: () => void) {
+    vibrationTimeoutRef.current = window.setTimeout(() => {
+      if (!vibrationActiveRef.current) return;
+      next();
+    }, delay);
+  }
+
+  function runHeartbeatCycle() {
+    if (!vibrationActiveRef.current) return;
+    Haptics.vibrate({ duration: HEARTBEAT_CYCLE.lub }).catch(() => {});
+    scheduleVibration(HEARTBEAT_CYCLE.gapAfterLub, () => {
+      Haptics.vibrate({ duration: HEARTBEAT_CYCLE.dub }).catch(() => {});
+      scheduleVibration(HEARTBEAT_CYCLE.rest, runHeartbeatCycle);
+    });
+  }
+
   function startGroundingVibration() {
     setVibrating(true);
-    if (VIBRATION_SUPPORTED) {
-      try { navigator.vibrate(HEARTBEAT_PATTERN); } catch { /* ignore */ }
-    }
+    vibrationActiveRef.current = true;
+    runHeartbeatCycle();
   }
 
   function stopGroundingVibration() {
     setVibrating(false);
-    if (VIBRATION_SUPPORTED) {
-      try { navigator.vibrate(0); } catch { /* ignore */ }
+    vibrationActiveRef.current = false;
+    if (vibrationTimeoutRef.current) {
+      clearTimeout(vibrationTimeoutRef.current);
+      vibrationTimeoutRef.current = null;
     }
   }
 
@@ -204,7 +226,7 @@ export default function SosModal({ open, onClose }: Props) {
               <p className="ground-instruction">
                 {vibrating ? 'Sigue así… respira con el ritmo' : 'Mantén tus dedos aquí'}
               </p>
-              {!VIBRATION_SUPPORTED && (
+              {!VIBRATION_LIKELY_SUPPORTED && (
                 <p className="ground-fallback-note">
                   Tu dispositivo no soporta vibración: usa el pulso visual como guía para tu respiración.
                 </p>

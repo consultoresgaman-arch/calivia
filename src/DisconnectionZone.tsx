@@ -71,6 +71,7 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
 
   const ensureAudio = useCallback((): AudioContext => {
     if (!audioRef.current) audioRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (audioRef.current.state === 'suspended') audioRef.current.resume().catch(() => {});
     return audioRef.current;
   }, []);
 
@@ -411,7 +412,7 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
 
         .dz-game-selector { display: flex; gap: 6px; padding: 0 20px 12px; overflow-x: auto; scrollbar-width: none; }
         .dz-game-selector::-webkit-scrollbar { display: none; }
-        .dz-game-tab { display: flex; align-items: center; gap: 5px; padding: 8px 14px; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+        .dz-game-tab { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; padding: 8px 14px; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
         .dz-game-tab.active { border-color: var(--primary); color: var(--primary); background: rgba(112,130,56,0.06); }
         .dz-game-tab.locked { color: var(--text-muted); border-style: dashed; }
         .dz-premium-badge { padding: 2px 7px; border-radius: 999px; background: rgba(196,154,90,0.16); color: var(--warn); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
