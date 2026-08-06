@@ -24,6 +24,11 @@ function voiceQualityScore(v: SpeechSynthesisVoice): number {
 
 const SYSTEM_NOTE = 'Soy Calivia (la unión de calma y alivio). Un espacio de acompañamiento, no sustituyo la atención profesional.';
 
+// Dictado por voz desactivado temporalmente: en algunos dispositivos el
+// motor nativo de reconocimiento se quedaba "escuchando" sin responder. El
+// chat de texto y la voz hablada de las respuestas (TTS) siguen intactos.
+const VOICE_INPUT_ENABLED = false;
+
 const QUICK_PROMPTS = [
   'No sé por dónde empezar',
   'Necesito un momento para respirar',
@@ -628,16 +633,18 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e, undefined, false); }
           }}
         />
-        <button
-          type="button"
-          className={`mic-btn ${recording ? 'rec' : ''} ${!voiceSupported ? 'disabled' : ''}`}
-          onClick={startVoiceInput}
-          disabled={limitReached || !voiceSupported}
-          aria-label={recording ? 'Detener grabación' : 'Hablar al micrófono'}
-          title={voiceSupported ? 'Dictar por voz y recibir respuesta hablada' : 'Tu navegador no soporta dictado por voz'}
-        >
-          <Mic size={18} strokeWidth={2} />
-        </button>
+        {VOICE_INPUT_ENABLED && (
+          <button
+            type="button"
+            className={`mic-btn ${recording ? 'rec' : ''} ${!voiceSupported ? 'disabled' : ''}`}
+            onClick={startVoiceInput}
+            disabled={limitReached || !voiceSupported}
+            aria-label={recording ? 'Detener grabación' : 'Hablar al micrófono'}
+            title={voiceSupported ? 'Dictar por voz y recibir respuesta hablada' : 'Tu navegador no soporta dictado por voz'}
+          >
+            <Mic size={18} strokeWidth={2} />
+          </button>
+        )}
         <button type="submit" className="send-btn" disabled={!input.trim() || limitReached}>
           <Send size={18} strokeWidth={2} />
         </button>
