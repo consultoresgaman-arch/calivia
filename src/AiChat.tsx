@@ -131,6 +131,11 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const fragmentTimerRef = useRef<number | null>(null);
   const ackIndexRef = useRef(0);
+  // Ref sincrónico (no el estado `sending`, que puede quedar un instante
+  // desactualizado por el renderizado de React) para saber sin ambigüedad
+  // si ya hay una cadena de mensajes en curso — así dos mensajes mandados
+  // casi al mismo tiempo nunca disparan dos llamadas a la IA en paralelo.
+  const chainActiveRef = useRef(false);
 
   const limitReached = messagesSent >= maxFree;
 
@@ -287,6 +292,14 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     setError(null);
     setInput('');
 
+    // Marca la cadena como activa ANTES de cualquier `await`, de forma
+    // sincrónica — así un segundo mensaje mandado un instante después
+    // siempre ve que ya hay algo en curso, sin depender del timing del
+    // estado de React. La caja de texto nunca se deshabilita por esto:
+    // solo cambia si esperamos con un acuse o llamamos a la IA de una vez.
+    const joiningActiveChain = chainActiveRef.current;
+    chainActiveRef.current = true;
+
     const tempId = `temp-${Date.now()}`;
     const now = new Date().toISOString();
     setMessages((m) => [...m, { id: tempId, user_id: userId, role: 'user', content: text, created_at: now }]);
@@ -306,26 +319,30 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       setError(err instanceof Error ? err.message : 'Error inesperado');
       setMessages((m) => m.filter((x) => x.id !== tempId));
       setInput(text);
+      if (!fragmentTimerRef.current) chainActiveRef.current = false;
       return;
     }
 
-    // Protocolo de espera: si la IA sigue respondiendo o el usuario acaba de
-    // escribir hace un momento, este mensaje es probablemente un fragmento
-    // de algo más largo. Solo un acuse breve, y reiniciamos la espera.
-    if (sending || fragmentTimerRef.current) {
+    // Protocolo de espera: si ya había una cadena en curso (la IA sigue
+    // respondiendo, o el usuario acaba de escribir hace un momento), este
+    // mensaje es probablemente un fragmento de algo más largo. Solo un
+    // acuse breve, y reiniciamos la espera — sin bloquear el input.
+    if (joiningActiveChain || fragmentTimerRef.current) {
       if (fragmentTimerRef.current) clearTimeout(fragmentTimerRef.current);
       const ack = BURST_ACK_REPLIES[ackIndexRef.current % BURST_ACK_REPLIES.length];
       ackIndexRef.current++;
       setMessages((m) => [...m, { id: `ack-${Date.now()}`, user_id: userId, role: 'assistant', content: ack, created_at: new Date().toISOString() }]);
-      fragmentTimerRef.current = window.setTimeout(() => {
+      fragmentTimerRef.current = window.setTimeout(async () => {
         fragmentTimerRef.current = null;
         ackIndexRef.current = 0;
-        callAssistant(text, isVoice);
+        await callAssistant(text, isVoice);
+        if (!fragmentTimerRef.current) chainActiveRef.current = false;
       }, FRAGMENT_QUIET_MS);
       return;
     }
 
     await callAssistant(text, isVoice);
+    if (!fragmentTimerRef.current) chainActiveRef.current = false;
   }
 
   async function callAssistant(text: string, isVoice: boolean) {
