@@ -123,9 +123,11 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   const [recording, setRecording] = useState(false);
   const [usingFallback, setUsingFallback] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(true);
-  
+
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceUri, setSelectedVoiceUri] = useState<string>('');
+  const [voicesLoading, setVoicesLoading] = useState(true);
+  const hasSelectedVoiceRef = useRef(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
@@ -143,29 +145,46 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) setVoiceSupported(false);
 
+    const synthAvailable = typeof window !== 'undefined' && 'speechSynthesis' in window;
+    if (!synthAvailable) {
+      setVoicesLoading(false);
+      return;
+    }
+
+    let settled = false;
+
     function loadVoices() {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        const allVoices = window.speechSynthesis.getVoices();
-        const spanishVoices = allVoices.filter((v) => v.lang.toLowerCase().includes('es'));
-        
-        if (spanishVoices.length > 0) {
-          setVoices(spanishVoices);
-          if (!selectedVoiceUri) {
-            const preferred = spanishVoices.find((v) => v.lang.toLowerCase().includes('co') || v.lang.toLowerCase().includes('419')) || spanishVoices[0];
-            setSelectedVoiceUri(preferred.voiceURI);
-          }
-        } else if (allVoices.length > 0) {
-          setVoices(allVoices);
-          if (!selectedVoiceUri) setSelectedVoiceUri(allVoices[0].voiceURI);
-        }
+      const allVoices = window.speechSynthesis.getVoices();
+      if (allVoices.length === 0) return;
+
+      const spanishVoices = allVoices.filter((v) => v.lang.toLowerCase().includes('es'));
+      const usable = spanishVoices.length > 0 ? spanishVoices : allVoices;
+      setVoices(usable);
+      if (!hasSelectedVoiceRef.current) {
+        hasSelectedVoiceRef.current = true;
+        const preferred = spanishVoices.find((v) => v.lang.toLowerCase().includes('co') || v.lang.toLowerCase().includes('419')) || usable[0];
+        setSelectedVoiceUri(preferred.voiceURI);
       }
+      settled = true;
+      setVoicesLoading(false);
     }
 
     loadVoices();
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.onvoiceschanged = loadVoices;
-    }
-  }, [selectedVoiceUri]);
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+
+    // Algunos WebView (sobre todo en Android) nunca disparan "voiceschanged"
+    // ni devuelven voces — sin este plazo, el selector se queda cargando
+    // para siempre. Si a los 2.5s no hay nada, dejamos de esperar y
+    // ocultamos el selector en vez de mostrar un spinner infinito.
+    const timeout = window.setTimeout(() => {
+      if (!settled) setVoicesLoading(false);
+    }, 2500);
+
+    return () => {
+      window.clearTimeout(timeout);
+      if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
 
   function speakResponse(text: string) {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -218,7 +237,24 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     setRecording(false);
   }
 
-  function startVoiceInput() {
+  // En Android (WebView de Capacitor) el navegador no pide el permiso de
+  // micrófono solo con arrancar el reconocimiento de voz — hay que
+  // solicitarlo explícitamente primero vía getUserMedia (con el permiso
+  // RECORD_AUDIO ya declarado en el manifest, esto sí dispara el diálogo
+  // nativo de Android la primera vez). En navegadores normales esto es
+  // inofensivo y a veces incluso evita el prompt duplicado de SpeechRecognition.
+  async function ensureMicPermission(): Promise<boolean> {
+    if (!navigator.mediaDevices?.getUserMedia) return true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function startVoiceInput() {
     if (!voiceSupported || recording) {
       stopRecognition();
       return;
@@ -228,6 +264,13 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     if (!SR) return;
 
     stopRecognition();
+    setError(null);
+
+    const micGranted = await ensureMicPermission();
+    if (!micGranted) {
+      setError('Necesitamos permiso de micrófono para dictar por voz. Revísalo en los ajustes de la app.');
+      return;
+    }
 
     const recognition = new SR();
     recognition.lang = 'es-CO';
@@ -402,6 +445,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         </div>
       </div>
 
+      {(voicesLoading || voices.length > 0) && (
       <div className="voice-selector-bar">
         <label htmlFor="voice-select">
           <Volume2 size={14} /> Voz de Calivia:
@@ -411,6 +455,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           value={selectedVoiceUri}
           onChange={(e) => setSelectedVoiceUri(e.target.value)}
           aria-label="Seleccionar voz de Calivia"
+          disabled={voicesLoading}
         >
           {voices.length > 0 ? (
             voices.map((v) => (
@@ -419,10 +464,11 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
               </option>
             ))
           ) : (
-            <option value="">Cargando voces...</option>
+            <option value="">Buscando voces…</option>
           )}
         </select>
       </div>
+      )}
 
       <div className="chat-body" ref={scrollRef}>
         {loading ? (

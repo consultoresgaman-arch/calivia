@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react';
-import { X, Volume2, VolumeX, Circle, Leaf, CloudRain, Lock } from 'lucide-react';
+import { X, Volume2, VolumeX, Circle, Leaf, CloudRain, Lock, Sparkles } from 'lucide-react';
 import { openCheckout } from './lib/payments';
 
 interface Props {
@@ -10,7 +10,7 @@ interface Props {
   name?: string | null;
 }
 
-type GameId = 'spheres' | 'trace' | 'raindrop';
+type GameId = 'spheres' | 'trace' | 'raindrop' | 'particles';
 
 interface Sphere {
   id: number;
@@ -28,6 +28,7 @@ interface Drop {
   y: number;
   speed: number;
   popped: boolean;
+  noteIndex: number;
 }
 
 interface Ripple {
@@ -43,9 +44,27 @@ interface TracePoint {
   age: number;
 }
 
+interface Particle {
+  id: number;
+  x: number;
+  y: number;
+  size: number;
+  hue: number;
+  age: number;
+}
+
 const SPHERE_COLORS = ['#A8B87E', '#8FAF6B', '#C9A66B', '#B08BC0', '#6FA8B8'];
 const PAIR_COUNT = 4;
 const MAX_DROPS = 9;
+
+// "Estrellita dónde estás" / Twinkle Twinkle Little Star — melodía tradicional
+// de dominio público, sencilla y ampliamente reconocible en tono relajante.
+const MELODY = [
+  261.63, 261.63, 392.0, 392.0, 440.0, 440.0, 392.0,
+  349.23, 349.23, 329.63, 329.63, 293.66, 293.66, 261.63,
+];
+
+const PARTICLE_HUES = [82, 96, 40, 270, 195];
 
 export default function DisconnectionZone({ open, onClose, isPremium, userId, name }: Props) {
   const [game, setGame] = useState<GameId>('spheres');
@@ -57,9 +76,15 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
 
   const [drops, setDrops] = useState<Drop[]>([]);
   const wipingRef = useRef(false);
+  const [melodyDone, setMelodyDone] = useState(false);
+  const spawnedInRoundRef = useRef(0);
+  const resolvedInRoundRef = useRef(0);
 
   const [ripples, setRipples] = useState<Ripple[]>([]);
   const [tracePoints, setTracePoints] = useState<TracePoint[]>([]);
+
+  const [particles, setParticles] = useState<Particle[]>([]);
+  const nextParticleId = useRef(0);
 
   const audioRef = useRef<AudioContext | null>(null);
   const nextSphereId = useRef(0);
@@ -121,22 +146,41 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
     setDragPos(null);
   }, [open, game]);
 
-  // Raindrop game: continuously spawn falling drops
+  // Raindrop game ("Lluvia de Melodías"): cada gota lleva una nota secuencial
+  // de la melodía. Se resuelve (suene o no) al tocarla o al caer sin tocar.
+  function startMelodyRound() {
+    spawnedInRoundRef.current = 0;
+    resolvedInRoundRef.current = 0;
+    setMelodyDone(false);
+  }
+
+  function resolveNote() {
+    resolvedInRoundRef.current++;
+    if (resolvedInRoundRef.current >= MELODY.length) {
+      setMelodyDone(true);
+      setTimeout(startMelodyRound, 4500);
+    }
+  }
+
   useEffect(() => {
     if (!open || game !== 'raindrop') return;
     setDrops([]); setRipples([]);
+    startMelodyRound();
     function spawn() {
       setDrops((prev) => {
         const active = prev.filter((d) => !d.popped);
         if (active.length >= MAX_DROPS) return prev;
+        if (spawnedInRoundRef.current >= MELODY.length) return prev;
+        const noteIndex = spawnedInRoundRef.current;
+        spawnedInRoundRef.current++;
         return [...prev, {
           id: nextDropId.current++, x: 8 + Math.random() * 84, y: -4,
-          speed: 0.26 + Math.random() * 0.18, popped: false,
+          speed: 0.22 + Math.random() * 0.14, popped: false, noteIndex,
         }];
       });
     }
     spawn();
-    const interval = setInterval(spawn, 850);
+    const interval = setInterval(spawn, 900);
     return () => clearInterval(interval);
   }, [open, game]);
 
@@ -144,9 +188,16 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
   useEffect(() => {
     if (!open || game !== 'raindrop') return;
     function tick() {
-      setDrops((prev) => prev
-        .map((d) => (d.popped ? d : { ...d, y: d.y + d.speed }))
-        .filter((d) => d.popped || d.y < 105));
+      setDrops((prev) => {
+        const next: Drop[] = [];
+        for (const d of prev) {
+          if (d.popped) { next.push(d); continue; }
+          const ny = d.y + d.speed;
+          if (ny >= 105) { resolveNote(); continue; }
+          next.push({ ...d, y: ny });
+        }
+        return next;
+      });
       rafRef.current = requestAnimationFrame(tick);
     }
     rafRef.current = requestAnimationFrame(tick);
@@ -168,6 +219,16 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
     const interval = setInterval(() => {
       setTracePoints((prev) => prev.map((p) => ({ ...p, age: p.age + 1 })).filter((p) => p.age < 80));
     }, 50);
+    return () => clearInterval(interval);
+  }, [open, game]);
+
+  // Particles game: touch-reactive floating particles, pitch follows touch height
+  useEffect(() => {
+    if (!open || game !== 'particles') return;
+    setParticles([]);
+    const interval = setInterval(() => {
+      setParticles((prev) => prev.map((p) => ({ ...p, age: p.age + 1 })).filter((p) => p.age < 70));
+    }, 40);
     return () => clearInterval(interval);
   }, [open, game]);
 
@@ -227,7 +288,8 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
   function popDrop(d: Drop) {
     setDrops((prev) => prev.map((x) => (x.id === d.id ? { ...x, popped: true } : x)));
     setRipples((r) => [...r, { id: nextRippleId.current++, x: d.x, y: d.y, age: 0 }]);
-    playChime(480 + Math.random() * 80);
+    playChime(MELODY[d.noteIndex]);
+    resolveNote();
     setTimeout(() => setDrops((prev) => prev.filter((x) => x.id !== d.id)), 500);
   }
 
@@ -257,6 +319,17 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
     tracingRef.current = false;
   }
 
+  // --- Particles ---
+  function spawnParticles(e: React.PointerEvent) {
+    const pct = pointerToPercent(e.clientX, e.clientY);
+    const hue = PARTICLE_HUES[Math.floor(Math.random() * PARTICLE_HUES.length)];
+    setParticles((prev) => [...prev, {
+      id: nextParticleId.current++, x: pct.x, y: pct.y,
+      size: 10 + Math.random() * 20, hue, age: 0,
+    }]);
+    if (Math.random() < 0.45) playChime(220 + (100 - pct.y) * 3.2);
+  }
+
   function toggleSound() {
     if (!soundOn) ensureAudio();
     setSoundOn(!soundOn);
@@ -270,16 +343,19 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
   function handlePointerDown(e: React.PointerEvent) {
     if (game === 'trace') startTrace(e);
     else if (game === 'raindrop') { wipingRef.current = true; wipeHit(e); }
+    else if (game === 'particles') { tracingRef.current = true; spawnParticles(e); }
   }
 
   function handlePointerMove(e: React.PointerEvent) {
     if (game === 'spheres') moveSphereDrag(e);
     else if (game === 'trace') addTracePoint(e);
     else if (game === 'raindrop' && wipingRef.current) wipeHit(e);
+    else if (game === 'particles' && tracingRef.current) spawnParticles(e);
   }
 
   function handlePointerUp(e: React.PointerEvent) {
     wipingRef.current = false;
+    tracingRef.current = false;
     if (game === 'spheres') endSphereDrag(e);
     else if (game === 'trace') endTrace();
   }
@@ -288,8 +364,9 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
 
   const games: { id: GameId; title: string; icon: typeof Leaf; locked: boolean }[] = [
     { id: 'spheres', title: 'Esferas', icon: Circle, locked: false },
-    { id: 'raindrop', title: 'Lluvia', icon: CloudRain, locked: false },
+    { id: 'raindrop', title: 'Melodías', icon: CloudRain, locked: false },
     { id: 'trace', title: 'Trazar', icon: Leaf, locked: !isPremium },
+    { id: 'particles', title: 'Partículas', icon: Sparkles, locked: !isPremium },
   ];
 
   return (
@@ -353,7 +430,7 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
 
         {game === 'raindrop' && (
           <>
-            {drops.length === 0 && (
+            {drops.length === 0 && !melodyDone && (
               <div className="dz-empty"><p>Toca o desliza el dedo para limpiar las gotas.</p></div>
             )}
             {drops.map((d) => (
@@ -367,6 +444,33 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
               <div key={r.id} className="dz-ripple"
                 style={{ left: `${r.x}%`, top: `${r.y}%`, '--ripple-size': `${r.age * 2}px`, '--ripple-opacity': Math.max(0, 1 - r.age / 60) } as CSSProperties} />
             ))}
+            {melodyDone && (
+              <div className="dz-melody-msg anim-pop">
+                <p>🎵 Has despejado la melodía por completo.</p>
+                <p className="dz-melody-msg-sub">¿La reconoces?</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {game === 'particles' && (
+          <>
+            {particles.length === 0 && (
+              <div className="dz-empty"><p>Toca y desliza para sembrar partículas de luz.</p></div>
+            )}
+            {particles.map((p) => {
+              const opacity = Math.max(0, 1 - p.age / 70);
+              const scale = 1 + p.age / 70;
+              return (
+                <div key={p.id} className="dz-particle"
+                  style={{
+                    left: `${p.x}%`, top: `${p.y}%`,
+                    width: `${p.size}px`, height: `${p.size}px`,
+                    background: `radial-gradient(circle, hsla(${p.hue},55%,62%,0.9), hsla(${p.hue},55%,52%,0))`,
+                    opacity, transform: `translate(-50%, -50%) scale(${scale})`,
+                  }} />
+              );
+            })}
           </>
         )}
 
@@ -391,8 +495,9 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
 
       <p className="dz-hint">
         {game === 'spheres' && 'Conecta cada esfera con su pareja del mismo color. Sin prisa, sin meta.'}
-        {game === 'raindrop' && 'Limpia las gotas a tu ritmo. Las que no toques simplemente siguen su camino.'}
+        {game === 'raindrop' && 'Cada gota es una nota. Límpialas a tu ritmo y descubre la melodía.'}
         {game === 'trace' && 'Traza líneas suaves con el dedo. Sin meta, sin destino.'}
+        {game === 'particles' && 'Toca y desliza el dedo. Cada roce enciende una partícula y un tono distinto.'}
       </p>
 
       <style>{`
@@ -440,6 +545,12 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
         }
         .dz-raindrop.popped { animation: driftAway 0.5s ease-out forwards; pointer-events: none; }
         .dz-ripple { position: absolute; border-radius: 50%; border: 2px solid rgba(112,130,56,0.4); width: var(--ripple-size); height: var(--ripple-size); opacity: var(--ripple-opacity); transform: translate(-50%, -50%); pointer-events: none; transition: width 0.04s linear, height 0.04s linear, opacity 0.04s linear; }
+
+        .dz-melody-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; max-width: 280px; }
+        .dz-melody-msg p { margin: 0; color: var(--text-soft); font-size: 15px; font-weight: 600; }
+        .dz-melody-msg-sub { margin-top: 4px !important; font-size: 13px !important; font-weight: 500 !important; color: var(--text-muted) !important; }
+
+        .dz-particle { position: absolute; border-radius: 50%; pointer-events: none; transition: opacity 0.06s linear, transform 0.06s linear; }
 
         .dz-trace-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
         .dz-trace-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: rgba(168,184,126,0.8); transform: translate(-50%, -50%); pointer-events: none; transition: opacity 0.1s; }
