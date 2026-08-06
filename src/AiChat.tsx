@@ -172,23 +172,29 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     let settled = false;
 
     function loadVoices() {
-      const allVoices = window.speechSynthesis.getVoices();
-      if (allVoices.length === 0) return;
+      try {
+        const allVoices = window.speechSynthesis.getVoices();
+        if (allVoices.length === 0) return;
 
-      const spanishVoices = allVoices.filter((v) => v.lang.toLowerCase().includes('es'));
-      const pool = spanishVoices.length > 0 ? spanishVoices : allVoices;
-      const highQuality = pool.filter((v) => voiceQualityScore(v) > 0);
-      const usable = (highQuality.length > 0 ? highQuality : pool)
-        .slice()
-        .sort((a, b) => voiceQualityScore(b) - voiceQualityScore(a));
-      setVoices(usable);
-      if (!hasSelectedVoiceRef.current) {
-        hasSelectedVoiceRef.current = true;
-        const preferred = usable.find((v) => v.lang.toLowerCase().includes('co') || v.lang.toLowerCase().includes('419')) || usable[0];
-        setSelectedVoiceUri(preferred.voiceURI);
+        const spanishVoices = allVoices.filter((v) => v.lang.toLowerCase().includes('es'));
+        const pool = spanishVoices.length > 0 ? spanishVoices : allVoices;
+        const highQuality = pool.filter((v) => voiceQualityScore(v) > 0);
+        const usable = (highQuality.length > 0 ? highQuality : pool)
+          .slice()
+          .sort((a, b) => voiceQualityScore(b) - voiceQualityScore(a));
+        setVoices(usable);
+        if (!hasSelectedVoiceRef.current) {
+          hasSelectedVoiceRef.current = true;
+          const preferred = usable.find((v) => v.lang.toLowerCase().includes('co') || v.lang.toLowerCase().includes('419')) || usable[0];
+          setSelectedVoiceUri(preferred.voiceURI);
+        }
+        settled = true;
+        setVoicesLoading(false);
+      } catch (err) {
+        console.error('[Calivia] loadVoices falló:', err);
+        settled = true;
+        setVoicesLoading(false);
       }
-      settled = true;
-      setVoicesLoading(false);
     }
 
     loadVoices();
@@ -199,7 +205,10 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     // para siempre. Si a los 2.5s no hay nada, dejamos de esperar y
     // ocultamos el selector en vez de mostrar un spinner infinito.
     const timeout = window.setTimeout(() => {
-      if (!settled) setVoicesLoading(false);
+      if (!settled) {
+        console.error('[Calivia] speechSynthesis.getVoices() nunca devolvió voces en 2.5s (ni voiceschanged disparó); ocultando el selector.');
+        setVoicesLoading(false);
+      }
     }, 2500);
 
     return () => {
@@ -268,11 +277,15 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   async function ensureMicPermission(): Promise<boolean> {
     if (Capacitor.isNativePlatform()) {
       try {
-        const { granted } = await MicPermission.requestMicPermission();
+        // Si el puente nativo tarda o nunca responde, no dejamos el botón
+        // colgado esperando para siempre: a los 5s seguimos con el flujo web.
+        const timeout = new Promise<never>((_, reject) => {
+          window.setTimeout(() => reject(new Error('mic-plugin-timeout')), 5000);
+        });
+        const { granted } = await Promise.race([MicPermission.requestMicPermission(), timeout]);
         if (!granted) return false;
-      } catch {
-        // Si el plugin nativo no está disponible por algún motivo, seguimos
-        // con el flujo web como respaldo en vez de bloquear el dictado.
+      } catch (err) {
+        console.error('[Calivia] MicPermission.requestMicPermission falló o expiró, sigo con getUserMedia como respaldo:', err);
       }
     }
     if (!navigator.mediaDevices?.getUserMedia) return true;
@@ -280,7 +293,8 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
       return true;
-    } catch {
+    } catch (err) {
+      console.error('[Calivia] getUserMedia denegó el acceso al micrófono:', err);
       return false;
     }
   }
@@ -292,67 +306,74 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     }
 
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition as SpeechRecognitionConstructor;
-    if (!SR) return;
+    if (!SR) {
+      console.error('[Calivia] startVoiceInput: SpeechRecognition no está disponible en este navegador.');
+      setError('Tu navegador no soporta dictado por voz.');
+      return;
+    }
 
     stopRecognition();
     setError(null);
 
-    const micGranted = await ensureMicPermission();
-    if (!micGranted) {
-      setError('Necesitamos permiso de micrófono para dictar por voz. Revísalo en los ajustes de la app.');
-      return;
-    }
+    try {
+      const micGranted = await ensureMicPermission();
+      if (!micGranted) {
+        setError('Necesitamos permiso de micrófono para dictar por voz. Revísalo en los ajustes de la app.');
+        return;
+      }
 
-    const recognition = new SR();
-    recognition.lang = 'es-CO';
-    recognition.continuous = false;
-    recognition.interimResults = true;
+      const recognition = new SR();
+      recognition.lang = 'es-CO';
+      recognition.continuous = false;
+      recognition.interimResults = true;
 
-    let finalTranscript = '';
+      let finalTranscript = '';
 
-    recognition.onresult = (e: SpeechRecognitionEvent) => {
-      let interim = '';
-      for (let i = 0; i < e.results.length; i++) {
-        const result = e.results[i];
-        if (result.length > 0) {
-          const transcript = result[0].transcript;
-          if (i === e.results.length - 1 && typeof (result as any).isFinal === 'boolean' && (result as any).isFinal) {
-            finalTranscript += transcript;
-          } else {
-            interim += transcript;
+      recognition.onresult = (e: SpeechRecognitionEvent) => {
+        let interim = '';
+        for (let i = 0; i < e.results.length; i++) {
+          const result = e.results[i];
+          if (result.length > 0) {
+            const transcript = result[0].transcript;
+            if (i === e.results.length - 1 && typeof (result as any).isFinal === 'boolean' && (result as any).isFinal) {
+              finalTranscript += transcript;
+            } else {
+              interim += transcript;
+            }
           }
         }
-      }
-      setInput(finalTranscript + interim);
-    };
+        setInput(finalTranscript + interim);
+      };
 
-    recognition.onerror = (e: Event) => {
-      const errEvent = e as any;
-      if (errEvent.error === 'not-allowed' || errEvent.error === 'service-not-allowed') {
-        setError('No se pudo acceder al micrófono. Revisa los permisos del navegador.');
-      } else if (errEvent.error !== 'no-speech' && errEvent.error !== 'aborted') {
-        setError('No se pudo transcribir la voz. Intenta escribir tu mensaje.');
-      }
-      setRecording(false);
-      recognitionRef.current = null;
-    };
+      recognition.onerror = (e: Event) => {
+        const errEvent = e as any;
+        console.error('[Calivia] SpeechRecognition onerror:', errEvent.error);
+        if (errEvent.error === 'not-allowed' || errEvent.error === 'service-not-allowed') {
+          setError('No se pudo acceder al micrófono. Revisa los permisos del navegador.');
+        } else if (errEvent.error !== 'no-speech' && errEvent.error !== 'aborted') {
+          setError('No se pudo transcribir la voz. Intenta escribir tu mensaje.');
+        }
+        setRecording(false);
+        recognitionRef.current = null;
+      };
 
-    recognition.onend = () => {
-      setRecording(false);
-      recognitionRef.current = null;
-      const textToSend = finalTranscript.trim();
-      if (textToSend) {
-        setInput('');
-        send(null, textToSend, true);
-      }
-    };
+      recognition.onend = () => {
+        setRecording(false);
+        recognitionRef.current = null;
+        const textToSend = finalTranscript.trim();
+        if (textToSend) {
+          setInput('');
+          send(null, textToSend, true);
+        }
+      };
 
-    recognitionRef.current = recognition;
-    setRecording(true);
-    setError(null);
-    try {
+      recognitionRef.current = recognition;
+      setRecording(true);
+      setError(null);
       recognition.start();
-    } catch {
+    } catch (err) {
+      console.error('[Calivia] startVoiceInput falló inesperadamente:', err);
+      setError('No se pudo iniciar el dictado por voz. Intenta de nuevo.');
       setRecording(false);
       recognitionRef.current = null;
     }
