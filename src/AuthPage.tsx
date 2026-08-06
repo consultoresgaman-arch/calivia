@@ -1,19 +1,73 @@
 import { useState } from 'react';
 import { useAuth } from './lib/auth';
+import { supabase } from './lib/supabase';
 import type { Role } from './lib/types';
+
+type Mode = 'signin' | 'signup' | 'forgot';
 
 export default function AuthPage() {
   const { signIn, signUp } = useAuth();
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [mode, setMode] = useState<Mode>('signin');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<Role>('patient');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function switchMode(m: 'signin' | 'signup') {
+  const [forgotStep, setForgotStep] = useState<'request' | 'reset'>('request');
+  const [forgotName, setForgotName] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [forgotMessage, setForgotMessage] = useState<string | null>(null);
+
+  function switchMode(m: Mode) {
     setError(null);
+    setForgotMessage(null);
+    if (m === 'forgot') { setForgotStep('request'); setForgotName(fullName); }
     setMode(m);
+  }
+
+  async function handleRequestCode(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/request-password-reset`;
+      const res = await fetch(fnUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ name: forgotName }),
+      });
+      const json = await res.json().catch(() => ({}));
+      setForgotMessage(json.message || 'Si el nombre existe y tiene correo de recuperación, le enviamos un código.');
+      setForgotStep('reset');
+    } catch {
+      setError('No se pudo enviar la solicitud. Intenta de nuevo.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResetWithCode(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const { error: rpcError } = await supabase.rpc('reset_password_with_code', {
+        p_name: forgotName,
+        p_code: resetCode.trim(),
+        p_new_password: newPassword,
+      });
+      if (rpcError) throw rpcError;
+      setFullName(forgotName);
+      setPassword('');
+      setForgotMessage('Contraseña actualizada. Ya puedes iniciar sesión.');
+      setMode('signin');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Código inválido o vencido');
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -43,76 +97,139 @@ export default function AuthPage() {
         </div>
         <p className="auth-tagline">Un refugio para acompañarte</p>
 
-        <div className="auth-tabs">
-          <button
-            className={`atab ${mode === 'signin' ? 'active' : ''}`}
-            onClick={() => switchMode('signin')}
-            type="button"
-          >
-            Iniciar sesión
-          </button>
-          <button
-            className={`atab ${mode === 'signup' ? 'active' : ''}`}
-            onClick={() => switchMode('signup')}
-            type="button"
-          >
-            Crear cuenta
-          </button>
-        </div>
+        {mode !== 'forgot' && (
+          <div className="auth-tabs">
+            <button
+              className={`atab ${mode === 'signin' ? 'active' : ''}`}
+              onClick={() => switchMode('signin')}
+              type="button"
+            >
+              Iniciar sesión
+            </button>
+            <button
+              className={`atab ${mode === 'signup' ? 'active' : ''}`}
+              onClick={() => switchMode('signup')}
+              type="button"
+            >
+              Crear cuenta
+            </button>
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit} className="auth-form">
-          <label className="auth-field">
-            <span>Nombre</span>
-            <input
-              type="text"
-              required
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              placeholder="Cómo te llaman"
-              autoComplete="name"
-            />
-          </label>
+        {mode === 'forgot' ? (
+          <div className="auth-form">
+            <button type="button" className="auth-back" onClick={() => switchMode('signin')}>← Volver a iniciar sesión</button>
+            {forgotStep === 'request' ? (
+              <form onSubmit={handleRequestCode} className="auth-form" style={{ padding: 0 }}>
+                <label className="auth-field">
+                  <span>Nombre de tu cuenta</span>
+                  <input
+                    type="text"
+                    required
+                    value={forgotName}
+                    onChange={(e) => setForgotName(e.target.value)}
+                    placeholder="Cómo te llamas en Calivia"
+                  />
+                </label>
+                {error && <div className="auth-error">{error}</div>}
+                <button type="submit" className="auth-btn" disabled={loading}>
+                  {loading ? 'Enviando…' : 'Enviar código'}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleResetWithCode} className="auth-form" style={{ padding: 0 }}>
+                {forgotMessage && <p className="auth-hint">{forgotMessage}</p>}
+                <label className="auth-field">
+                  <span>Código de 6 dígitos</span>
+                  <input
+                    type="text"
+                    required
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={resetCode}
+                    onChange={(e) => setResetCode(e.target.value)}
+                    placeholder="000000"
+                  />
+                </label>
+                <label className="auth-field">
+                  <span>Contraseña nueva</span>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                  />
+                </label>
+                {error && <div className="auth-error">{error}</div>}
+                <button type="submit" className="auth-btn" disabled={loading}>
+                  {loading ? 'Guardando…' : 'Cambiar contraseña'}
+                </button>
+              </form>
+            )}
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="auth-form">
+            <label className="auth-field">
+              <span>Nombre</span>
+              <input
+                type="text"
+                required
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="Cómo te llaman"
+                autoComplete="name"
+              />
+            </label>
 
-          {mode === 'signup' && (
-            <div className="auth-field">
-              <span>Rol</span>
-              <div className="role-row">
-                <button
-                  type="button"
-                  className={`arole ${role === 'patient' ? 'active' : ''}`}
-                  onClick={() => setRole('patient')}
-                >
-                  Acompañado
-                </button>
-                <button
-                  type="button"
-                  className={`arole ${role === 'psychologist' ? 'active' : ''}`}
-                  onClick={() => setRole('psychologist')}
-                >
-                  Especialista
-                </button>
+            {mode === 'signup' && (
+              <div className="auth-field">
+                <span>Rol</span>
+                <div className="role-row">
+                  <button
+                    type="button"
+                    className={`arole ${role === 'patient' ? 'active' : ''}`}
+                    onClick={() => setRole('patient')}
+                  >
+                    Acompañado
+                  </button>
+                  <button
+                    type="button"
+                    className={`arole ${role === 'psychologist' ? 'active' : ''}`}
+                    onClick={() => setRole('psychologist')}
+                  >
+                    Especialista
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          <label className="auth-field">
-            <span>Contraseña</span>
-            <input
-              type="password"
-              required
-              minLength={6}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Mínimo 6 caracteres"
-            />
-          </label>
+            <label className="auth-field">
+              <span>Contraseña</span>
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+              />
+            </label>
 
-          {error && <div className="auth-error">{error}</div>}
+            {mode === 'signin' && (
+              <button type="button" className="auth-forgot-link" onClick={() => switchMode('forgot')}>
+                ¿Olvidaste tu contraseña?
+              </button>
+            )}
 
-          <button type="submit" className="auth-btn" disabled={loading}>
-            {loading ? 'Cargando…' : mode === 'signin' ? 'Entrar al refugio' : 'Crear mi refugio'}
-          </button>
-        </form>
+            {error && <div className="auth-error">{error}</div>}
+
+            <button type="submit" className="auth-btn" disabled={loading}>
+              {loading ? 'Cargando…' : mode === 'signin' ? 'Entrar al refugio' : 'Crear mi refugio'}
+            </button>
+          </form>
+        )}
       </div>
 
       <style>{`
@@ -212,6 +329,24 @@ export default function AuthPage() {
         .auth-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(112,130,56,0.3); }
         .auth-btn:active { transform: scale(0.99); }
         .auth-btn:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
+
+        .auth-forgot-link {
+          align-self: center; border: none; background: transparent;
+          color: var(--text-soft); font-size: 13px; font-weight: 600;
+          cursor: pointer; text-decoration: underline; padding: 2px;
+        }
+        .auth-forgot-link:hover { color: var(--primary-600); }
+        .auth-back {
+          align-self: flex-start; border: none; background: transparent;
+          color: var(--text-soft); font-size: 13px; font-weight: 600;
+          cursor: pointer; padding: 4px 0; margin: 4px 0 0;
+        }
+        .auth-back:hover { color: var(--primary-600); }
+        .auth-hint {
+          margin: 0; font-size: 13px; color: var(--text-soft);
+          background: var(--surface-2); padding: 10px 14px; border-radius: var(--radius-sm);
+          line-height: 1.5;
+        }
 
         .auth-error {
           background: var(--danger-bg);

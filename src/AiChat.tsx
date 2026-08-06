@@ -13,6 +13,17 @@ const QUICK_PROMPTS = [
   'Solo quiero que alguien me escuche',
 ];
 
+// Protocolo de espera (anti-interrupción): si el usuario sigue escribiendo
+// mensajes seguidos (mientras la IA todavía está "pensando" o apenas
+// terminó de responder), no lanzamos otro análisis largo — solo un acuse
+// breve, local, y esperamos a que haya una pausa real antes de responder.
+const FRAGMENT_QUIET_MS = 3500;
+const BURST_ACK_REPLIES = [
+  'Te sigo leyendo, continúa.',
+  'Aquí estoy. Sigue, tómate tu tiempo.',
+  'Te escucho, continúa cuando quieras.',
+];
+
 const FALLBACK_GREETINGS = {
   morning: 'Buenos días, soy Calivia. ¿Cómo te sientes para comenzar tu día?',
   afternoon: 'Hola, buenas tardes, soy Calivia. Recuerda que debes comer, o ¿ya has comido? ¿Cómo va tu día?',
@@ -118,6 +129,8 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const fragmentTimerRef = useRef<number | null>(null);
+  const ackIndexRef = useRef(0);
 
   const limitReached = messagesSent >= maxFree;
 
@@ -166,6 +179,10 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       window.speechSynthesis.speak(utterance);
     }
   }
+
+  useEffect(() => () => {
+    if (fragmentTimerRef.current) clearTimeout(fragmentTimerRef.current);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -265,25 +282,55 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   async function send(e: React.FormEvent | null, overrideText?: string, isVoice: boolean = false) {
     e?.preventDefault();
     const text = (overrideText ?? input).trim();
-    if (!text || sending || limitReached) return;
+    if (!text || limitReached) return;
     stopRecognition();
     setError(null);
-    setSending(true);
     setInput('');
 
     const tempId = `temp-${Date.now()}`;
     const now = new Date().toISOString();
     setMessages((m) => [...m, { id: tempId, user_id: userId, role: 'user', content: text, created_at: now }]);
 
+    let saved: ChatLog;
     try {
-      const { data: saved, error: insErr } = await supabase
+      const { data, error: insErr } = await supabase
         .from('chat_logs')
         .insert({ user_id: userId, role: 'user', content: text })
         .select()
         .single();
       if (insErr) throw insErr;
+      saved = data;
       setMessages((m) => m.map((x) => (x.id === tempId ? saved : x)));
+      onMessageSent();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error inesperado');
+      setMessages((m) => m.filter((x) => x.id !== tempId));
+      setInput(text);
+      return;
+    }
 
+    // Protocolo de espera: si la IA sigue respondiendo o el usuario acaba de
+    // escribir hace un momento, este mensaje es probablemente un fragmento
+    // de algo más largo. Solo un acuse breve, y reiniciamos la espera.
+    if (sending || fragmentTimerRef.current) {
+      if (fragmentTimerRef.current) clearTimeout(fragmentTimerRef.current);
+      const ack = BURST_ACK_REPLIES[ackIndexRef.current % BURST_ACK_REPLIES.length];
+      ackIndexRef.current++;
+      setMessages((m) => [...m, { id: `ack-${Date.now()}`, user_id: userId, role: 'assistant', content: ack, created_at: new Date().toISOString() }]);
+      fragmentTimerRef.current = window.setTimeout(() => {
+        fragmentTimerRef.current = null;
+        ackIndexRef.current = 0;
+        callAssistant(text, isVoice);
+      }, FRAGMENT_QUIET_MS);
+      return;
+    }
+
+    await callAssistant(text, isVoice);
+  }
+
+  async function callAssistant(text: string, isVoice: boolean) {
+    setSending(true);
+    try {
       const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`;
       const localTime = new Date().toTimeString().slice(0, 5);
       const res = await fetch(fnUrl, {
@@ -314,17 +361,13 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       setUsingFallback(isFallback);
       const assistantLog: ChatLog = { id: `a-${Date.now()}`, user_id: userId, role: 'assistant', content: reply, created_at: new Date().toISOString() };
       setMessages((m) => [...m, assistantLog]);
-      
+
       if (isVoice) {
         speakResponse(reply);
       }
-
-      onMessageSent();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error inesperado';
       setError(msg);
-      setMessages((m) => m.filter((x) => x.id !== tempId));
-      setInput(text);
     } finally {
       setSending(false);
     }
@@ -376,7 +419,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
             <p className="chat-welcome-sub">Te escucho, sin prisa.</p>
             <div className="quick-prompts">
               {QUICK_PROMPTS.map((q) => (
-                <button key={q} type="button" className="quick-chip" onClick={() => send(null, q, false)} disabled={sending || limitReached}>
+                <button key={q} type="button" className="quick-chip" onClick={() => send(null, q, false)} disabled={limitReached}>
                   {q}
                 </button>
               ))}
@@ -409,7 +452,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       {messages.length > 0 && !limitReached && (
         <div className="quick-prompts quick-prompts-slim">
           {QUICK_PROMPTS.map((q) => (
-            <button key={q} type="button" className="quick-chip" onClick={() => send(null, q, false)} disabled={sending}>
+            <button key={q} type="button" className="quick-chip" onClick={() => send(null, q, false)}>
               {q}
             </button>
           ))}
@@ -444,7 +487,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={limitReached ? 'Límite diario alcanzado…' : recording ? 'Escuchando… habla ahora' : 'Escribe lo que traes dentro…'}
-          disabled={sending || limitReached}
+          disabled={limitReached}
           aria-label="Mensaje a Calivia"
           rows={1}
           onKeyDown={(e) => {
@@ -461,7 +504,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         >
           <Mic size={18} strokeWidth={2} />
         </button>
-        <button type="submit" className="send-btn" disabled={sending || !input.trim() || limitReached}>
+        <button type="submit" className="send-btn" disabled={!input.trim() || limitReached}>
           <Send size={18} strokeWidth={2} />
         </button>
       </form>

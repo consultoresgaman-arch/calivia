@@ -9,6 +9,7 @@ import { supabase } from './lib/supabase';
 interface Props {
   open: boolean;
   onClose: () => void;
+  initialGrounding?: boolean;
 }
 
 // Un latido: lub, pausa corta, dub, descanso largo (~70 lpm). Se dispara con
@@ -28,7 +29,7 @@ type BreathPhase = 'inhale' | 'exhale';
 
 const PHASE_DURATION: Record<BreathPhase, number> = { inhale: 4000, exhale: 6000 };
 
-export default function SosModal({ open, onClose }: Props) {
+export default function SosModal({ open, onClose, initialGrounding }: Props) {
   const { profile, refreshProfile } = useAuth();
   const [country, setCountry] = useState(profile?.country ?? '');
   const [saving, setSaving] = useState(false);
@@ -55,6 +56,10 @@ export default function SosModal({ open, onClose }: Props) {
   const vibrationTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => { setCountry(profile?.country ?? ''); }, [profile?.country]);
+
+  useEffect(() => {
+    if (open && initialGrounding) setGroundingActive(true);
+  }, [open, initialGrounding]);
 
   useEffect(() => {
     if (!open) return;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, CalendarClock, CloudRain } from 'lucide-react';
+import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, CalendarClock, CloudRain, NotebookPen } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useAuth } from './lib/auth';
 import AiChat from './AiChat';
@@ -9,11 +9,14 @@ import DisconnectionZone from './DisconnectionZone';
 import WeeklyProgress from './WeeklyProgress';
 import TaskManager from './TaskManager';
 import SoundGallery from './SoundGallery';
+import QuickCheckIn from './QuickCheckIn';
+import JournalSpace from './JournalSpace';
+import MicroPause from './MicroPause';
 
 const MAX_FREE_MESSAGES = 20;
 const CALENDLY_URL = 'https://calendly.com/consultoresgaman/30min';
 
-type Section = 'chat' | 'breathe' | 'games' | 'progress' | 'tasks' | 'sounds';
+type Section = 'chat' | 'breathe' | 'games' | 'progress' | 'tasks' | 'sounds' | 'journal';
 
 interface Props {
   onExitToHome?: () => void;
@@ -26,6 +29,11 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const [sosOpen, setSosOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [savingRecoveryEmail, setSavingRecoveryEmail] = useState(false);
+  const [recoveryEmailMsg, setRecoveryEmailMsg] = useState<string | null>(null);
+  const [showCheckIn, setShowCheckIn] = useState(true);
+  const [sosInitialGrounding, setSosInitialGrounding] = useState(false);
   const today = new Date().toISOString().slice(0, 10);
   const isPremium = !!profile?.is_premium;
   const maxFree = isPremium ? Infinity : MAX_FREE_MESSAGES;
@@ -44,6 +52,21 @@ export default function PatientDashboard({ onExitToHome }: Props) {
     })();
     return () => { mounted = false; };
   }, [profile, today]);
+
+  async function saveRecoveryEmail(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingRecoveryEmail(true);
+    setRecoveryEmailMsg(null);
+    try {
+      const { error } = await supabase.rpc('set_recovery_email', { p_email: recoveryEmail.trim() });
+      if (error) throw error;
+      setRecoveryEmailMsg('Guardado. Úsalo si alguna vez olvidas tu contraseña.');
+    } catch (err) {
+      setRecoveryEmailMsg(err instanceof Error ? err.message : 'No se pudo guardar');
+    } finally {
+      setSavingRecoveryEmail(false);
+    }
+  }
 
   return (
     <>
@@ -77,6 +100,22 @@ export default function PatientDashboard({ onExitToHome }: Props) {
                   <div className="user-menu-info">
                     <div className="user-menu-name">{profile?.full_name || 'Usuario'}</div>
                   </div>
+                  <form className="user-menu-recovery" onSubmit={saveRecoveryEmail}>
+                    <span>Correo de recuperación</span>
+                    <p>Solo para recuperar tu contraseña si la olvidas. Nunca se usa para entrar.</p>
+                    <div className="user-menu-recovery-row">
+                      <input
+                        type="email"
+                        value={recoveryEmail}
+                        onChange={(e) => setRecoveryEmail(e.target.value)}
+                        placeholder="tu@correo.com"
+                      />
+                      <button type="submit" disabled={savingRecoveryEmail}>
+                        {savingRecoveryEmail ? '…' : 'Guardar'}
+                      </button>
+                    </div>
+                    {recoveryEmailMsg && <p className="user-menu-recovery-msg">{recoveryEmailMsg}</p>}
+                  </form>
                   <button className="user-menu-logout" onClick={signOut} type="button">
                     <LogOut size={16} strokeWidth={2} /><span>Salir</span>
                   </button>
@@ -88,6 +127,10 @@ export default function PatientDashboard({ onExitToHome }: Props) {
       </header>
 
       <main className="refugio">
+        {section === 'chat' && showCheckIn && (
+          <QuickCheckIn userId={profile!.id} onDismiss={() => setShowCheckIn(false)} />
+        )}
+
         {section === 'chat' && !isPremium && (
           <FreemiumBanner
             messagesToday={messagesSent}
@@ -115,6 +158,9 @@ export default function PatientDashboard({ onExitToHome }: Props) {
           </button>
           <button className={`stab ${section === 'sounds' ? 'active' : ''}`} onClick={() => setSection('sounds')} type="button">
             <CloudRain size={16} strokeWidth={2} /><span>Sonidos</span>
+          </button>
+          <button className={`stab ${section === 'journal' ? 'active' : ''}`} onClick={() => setSection('journal')} type="button">
+            <NotebookPen size={16} strokeWidth={2} /><span>Diario</span>
           </button>
         </div>
 
@@ -168,7 +214,20 @@ export default function PatientDashboard({ onExitToHome }: Props) {
             <SoundGallery isPremium={isPremium} userId={profile!.id} name={profile?.full_name} />
           </div>
         )}
+
+        {section === 'journal' && (
+          <div className="progress-section anim-fade">
+            <JournalSpace
+              userId={profile!.id}
+              onOpenSounds={() => setSection('sounds')}
+              onOpenGames={() => setDisconnectOpen(true)}
+              onOpenVibration={() => { setSosInitialGrounding(true); setSosOpen(true); }}
+            />
+          </div>
+        )}
       </main>
+
+      <MicroPause />
 
       <div className="sos-dock">
         <button className="sos-fab" onClick={() => setSosOpen(true)} type="button">
@@ -176,7 +235,11 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         </button>
       </div>
 
-      <SosModal open={sosOpen} onClose={() => setSosOpen(false)} />
+      <SosModal
+        open={sosOpen}
+        onClose={() => { setSosOpen(false); setSosInitialGrounding(false); }}
+        initialGrounding={sosInitialGrounding}
+      />
       <DisconnectionZone
         open={disconnectOpen}
         onClose={() => setDisconnectOpen(false)}
@@ -204,10 +267,19 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         @media (min-width: 420px) { .hdr-btn-label { display: inline; } }
         .user-chip { position: relative; cursor: pointer; }
         .user-avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--secondary-200), var(--secondary)); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px; }
-        .user-menu { position: absolute; top: 40px; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 14px; min-width: 200px; z-index: 50; }
+        .user-menu { position: absolute; top: 40px; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 14px; min-width: 240px; max-width: 280px; z-index: 50; }
         .user-menu-info { padding-bottom: 10px; border-bottom: 1px solid var(--border-soft); margin-bottom: 10px; }
         .user-menu-name { font-size: 14px; font-weight: 700; }
         .user-menu-email { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
+        .user-menu-recovery { display: flex; flex-direction: column; gap: 4px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border-soft); }
+        .user-menu-recovery > span { font-size: 12px; font-weight: 700; color: var(--text); }
+        .user-menu-recovery p { margin: 0; font-size: 11px; color: var(--text-soft); line-height: 1.4; }
+        .user-menu-recovery-row { display: flex; gap: 6px; margin-top: 4px; }
+        .user-menu-recovery-row input { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); font-size: 12.5px; }
+        .user-menu-recovery-row input:focus { border-color: var(--primary); outline: none; }
+        .user-menu-recovery-row button { padding: 7px 10px; border: none; border-radius: 8px; background: var(--primary); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
+        .user-menu-recovery-row button:disabled { opacity: 0.6; }
+        .user-menu-recovery-msg { margin: 2px 0 0; font-size: 11px; color: var(--primary-600); }
         .user-menu-logout { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border: none; background: var(--surface-2); color: var(--text-soft); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
         .user-menu-logout:hover { background: var(--danger-bg); color: var(--danger); }
 
