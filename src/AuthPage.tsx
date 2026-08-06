@@ -1,11 +1,10 @@
 import { useState } from 'react';
-import { Heart } from 'lucide-react';
-import { supabase } from './lib/supabase';
+import { useAuth } from './lib/auth';
 import type { Role } from './lib/types';
 
 export default function AuthPage() {
+  const { signIn, signUp } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<Role>('patient');
@@ -23,26 +22,9 @@ export default function AuthPage() {
     setLoading(true);
     try {
       if (mode === 'signin') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        await signIn(fullName, password);
       } else {
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) {
-          if (error.message.toLowerCase().includes('already registered')) {
-            const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-            if (signInError) { setMode('signin'); throw signInError; }
-            return;
-          }
-          throw error;
-        }
-        if (data.user) {
-          await supabase.from('profiles').upsert({
-            id: data.user.id,
-            email,
-            full_name: fullName || null,
-            role,
-          });
-        }
+        await signUp(fullName, password, role);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error inesperado';
@@ -57,12 +39,9 @@ export default function AuthPage() {
       <div className="auth-glow" />
       <div className="auth-card">
         <div className="auth-brand">
-          <div className="auth-logo">
-            <Heart size={26} strokeWidth={1.8} />
-          </div>
-          <h1>Calivia</h1>
-          <p>Un refugio para acompañarte</p>
+          <img src="/logo-calivia.png" alt="Calivia" className="auth-logo-img" />
         </div>
+        <p className="auth-tagline">Un refugio para acompañarte</p>
 
         <div className="auth-tabs">
           <button
@@ -82,49 +61,39 @@ export default function AuthPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
-          {mode === 'signup' && (
-            <>
-              <label className="auth-field">
-                <span>Nombre</span>
-                <input
-                  type="text"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Cómo te llaman (opcional)"
-                />
-              </label>
-              <div className="auth-field">
-                <span>Rol</span>
-                <div className="role-row">
-                  <button
-                    type="button"
-                    className={`arole ${role === 'patient' ? 'active' : ''}`}
-                    onClick={() => setRole('patient')}
-                  >
-                    Acompañado
-                  </button>
-                  <button
-                    type="button"
-                    className={`arole ${role === 'psychologist' ? 'active' : ''}`}
-                    onClick={() => setRole('psychologist')}
-                  >
-                    Especialista
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-
           <label className="auth-field">
-            <span>Correo</span>
+            <span>Nombre</span>
             <input
-              type="email"
+              type="text"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="tu@correo.com"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Cómo te llaman"
+              autoComplete="name"
             />
           </label>
+
+          {mode === 'signup' && (
+            <div className="auth-field">
+              <span>Rol</span>
+              <div className="role-row">
+                <button
+                  type="button"
+                  className={`arole ${role === 'patient' ? 'active' : ''}`}
+                  onClick={() => setRole('patient')}
+                >
+                  Acompañado
+                </button>
+                <button
+                  type="button"
+                  className={`arole ${role === 'psychologist' ? 'active' : ''}`}
+                  onClick={() => setRole('psychologist')}
+                >
+                  Especialista
+                </button>
+              </div>
+            </div>
+          )}
 
           <label className="auth-field">
             <span>Contraseña</span>
@@ -174,20 +143,9 @@ export default function AuthPage() {
           position: relative; z-index: 1;
           animation: pop 0.3s ease;
         }
-        .auth-brand {
-          text-align: center; padding: 32px 24px 24px;
-          background: linear-gradient(135deg, var(--primary-200), var(--primary));
-          color: #fff;
-        }
-        .auth-logo {
-          width: 52px; height: 52px;
-          margin: 0 auto 12px;
-          border-radius: 16px;
-          background: rgba(255,255,255,0.18);
-          display: grid; place-items: center;
-        }
-        .auth-brand h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
-        .auth-brand p { margin: 6px 0 0; font-size: 14px; opacity: 0.9; }
+        .auth-brand { display: flex; justify-content: center; padding: 32px 24px 4px; }
+        .auth-logo-img { display: block; height: 52px; width: auto; object-fit: contain; }
+        .auth-tagline { margin: 10px 24px 0; text-align: center; font-size: 14px; color: var(--text-soft); }
 
         .auth-tabs {
           display: grid; grid-template-columns: 1fr 1fr;

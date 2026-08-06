@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Heart, BarChart3, LogOut, Calendar, FileText, Users } from 'lucide-react';
+import { BarChart3, LogOut, Calendar, FileText, Users, UserPlus, UserMinus, AlertTriangle, Check } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useAuth } from './lib/auth';
-import type { CheckIn, ChatLog, AiReport, Profile } from './lib/types';
+import type { CheckIn, ChatLog, AiReport, Profile, RiskAlert } from './lib/types';
 
 const DISCLAIMER =
   'La interpretación clínica final corresponde siempre al profesional. Este reporte es un apoyo analítico, no un diagnóstico.';
+
+const ALERT_DISCLAIMER =
+  'Detección automática por palabras clave, no es una evaluación clínica de riesgo. Úsala como una señal a revisar, no como un diagnóstico.';
 
 export default function TherapistDashboard() {
   const { profile, signOut } = useAuth();
@@ -13,38 +16,78 @@ export default function TherapistDashboard() {
   const [patients, setPatients] = useState<Profile[]>([]);
   const [checkins, setCheckins] = useState<CheckIn[]>([]);
   const [chatLogs, setChatLogs] = useState<ChatLog[]>([]);
+  const [alerts, setAlerts] = useState<RiskAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [linkName, setLinkName] = useState('');
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const [rep, pat, chk, chat] = await Promise.all([
+      const [rep, pat, chk, chat, alr] = await Promise.all([
         supabase.from('ai_reports').select('*').order('report_date', { ascending: false }),
         supabase.from('profiles').select('*').order('created_at', { ascending: false }),
         supabase.from('checkins').select('*').order('created_at', { ascending: false }).limit(500),
         supabase.from('chat_logs').select('*').order('created_at', { ascending: false }).limit(500),
+        supabase.from('risk_alerts').select('*').order('created_at', { ascending: false }).limit(100),
       ]);
       if (!mounted) return;
-      if (rep.error || pat.error || chk.error || chat.error) {
-        setError(rep.error?.message || pat.error?.message || chk.error?.message || chat.error?.message || 'Error');
+      if (rep.error || pat.error || chk.error || chat.error || alr.error) {
+        setError(rep.error?.message || pat.error?.message || chk.error?.message || chat.error?.message || alr.error?.message || 'Error');
       }
       setReports(rep.data ?? []);
       setPatients((pat.data ?? []).filter((p) => p.role === 'patient'));
       setCheckins(chk.data ?? []);
       setChatLogs(chat.data ?? []);
+      setAlerts(alr.data ?? []);
       setLoading(false);
     })();
     return () => { mounted = false; };
   }, []);
+
+  async function acknowledgeAlert(id: string) {
+    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, acknowledged: true } : a)));
+    await supabase.from('risk_alerts').update({ acknowledged: true }).eq('id', id);
+  }
 
   const patientById = useMemo(() => {
     const m = new Map<string, Profile>();
     for (const p of patients) m.set(p.id, p);
     return m;
   }, [patients]);
+
+  const pendingAlerts = useMemo(() => alerts.filter((a) => !a.acknowledged), [alerts]);
+
+  async function linkPatient(e: React.FormEvent) {
+    e.preventDefault();
+    const name = linkName.trim();
+    if (!name || linking) return;
+    setLinking(true);
+    setLinkError(null);
+    try {
+      const { data, error } = await supabase.rpc('link_patient', { p_name: name }).single<{ id: string; full_name: string }>();
+      if (error) throw error;
+      setLinkName('');
+      const { data: full } = await supabase.from('profiles').select('*').eq('id', data.id).maybeSingle();
+      setPatients((prev) => {
+        const withoutExisting = prev.filter((p) => p.id !== data.id);
+        return [...(full ? [full as Profile] : []), ...withoutExisting];
+      });
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'No se pudo vincular al paciente');
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  async function unlinkPatient(patientId: string) {
+    await supabase.rpc('unlink_patient', { p_patient_id: patientId });
+    setPatients((prev) => prev.filter((p) => p.id !== patientId));
+  }
 
   const reportsForDate = useMemo(
     () => reports.filter((r) => r.report_date === selectedDate),
@@ -102,11 +145,8 @@ export default function TherapistDashboard() {
       <header className="th-header">
         <div className="th-header-inner">
           <div className="brand">
-            <div className="brand-mark"><Heart size={20} strokeWidth={2} /></div>
-            <div>
-              <span className="brand-name">Calivia</span>
-              <span className="brand-sub">Panel del especialista</span>
-            </div>
+            <img src="/logo-calivia.png" alt="Calivia" className="brand-logo-img" />
+            <span className="brand-sub">Panel del especialista</span>
           </div>
           <div className="th-user">
             <span className="th-user-name">{profile?.full_name || 'Especialista'}</span>
@@ -119,6 +159,82 @@ export default function TherapistDashboard() {
 
       <main className="th-container">
         {error && <div className="th-error">{error}</div>}
+
+        {pendingAlerts.length > 0 && (
+          <section className="th-card th-alerts-card">
+            <div className="th-section-head alert">
+              <div className="th-section-icon alert"><AlertTriangle size={18} strokeWidth={2} /></div>
+              <div>
+                <h2>Alertas de riesgo ({pendingAlerts.length})</h2>
+                <p>{ALERT_DISCLAIMER}</p>
+              </div>
+            </div>
+            <div className="th-alert-list">
+              {pendingAlerts.map((a) => {
+                const p = patientById.get(a.patient_id);
+                return (
+                  <div key={a.id} className="th-alert-item">
+                    <div className="th-alert-body">
+                      <span className="th-alert-patient">{p?.full_name || 'Paciente'}</span>
+                      <span className="th-alert-reason">{a.reason}</span>
+                      {a.message_excerpt && <span className="th-alert-excerpt">"{a.message_excerpt}"</span>}
+                      <span className="th-alert-time">{new Date(a.created_at).toLocaleString('es-CL')}</span>
+                    </div>
+                    <button className="th-ack-btn" onClick={() => acknowledgeAlert(a.id)} type="button">
+                      <Check size={14} strokeWidth={2.5} /><span>Revisada</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        <section className="th-card">
+          <div className="th-section-head">
+            <div className="th-section-icon"><Users size={18} strokeWidth={2} /></div>
+            <div>
+              <h2>Mis pacientes</h2>
+              <p>Vincula pacientes por nombre para ver sus registros y reportes</p>
+            </div>
+          </div>
+          <form className="th-link-form" onSubmit={linkPatient}>
+            <input
+              type="text"
+              value={linkName}
+              onChange={(e) => setLinkName(e.target.value)}
+              placeholder="Nombre exacto del paciente"
+            />
+            <button type="submit" className="th-btn-primary" disabled={linking || !linkName.trim()}>
+              <UserPlus size={15} strokeWidth={2} />
+              <span>{linking ? 'Vinculando…' : 'Vincular'}</span>
+            </button>
+          </form>
+          {linkError && <p className="th-link-error">{linkError}</p>}
+          {!loading && (
+            <div className="th-patient-list">
+              {patients.length === 0 ? (
+                <p className="th-empty-inline">Todavía no tienes pacientes vinculados.</p>
+              ) : (
+                patients.map((p) => (
+                  <div key={p.id} className="th-patient-chip">
+                    <div className="th-avatar small">{(p.full_name || '?').charAt(0).toUpperCase()}</div>
+                    <span>{p.full_name}</span>
+                    <button
+                      type="button"
+                      className="th-unlink-btn"
+                      onClick={() => unlinkPatient(p.id)}
+                      aria-label={`Desvincular a ${p.full_name}`}
+                      title="Desvincular"
+                    >
+                      <UserMinus size={14} strokeWidth={2} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </section>
 
         <section className="th-card">
           <div className="th-section-head">
@@ -159,10 +275,9 @@ export default function TherapistDashboard() {
               return (
                 <article key={r.id} className="th-card th-report">
                   <header className="th-report-head">
-                    <div className="th-avatar">{(p?.full_name || p?.email || '?').charAt(0).toUpperCase()}</div>
+                    <div className="th-avatar">{(p?.full_name || '?').charAt(0).toUpperCase()}</div>
                     <div>
                       <h3>{p?.full_name || 'Paciente'}</h3>
-                      <span>{p?.email}</span>
                     </div>
                   </header>
                   <div className="th-report-section">
@@ -200,8 +315,7 @@ export default function TherapistDashboard() {
             display: flex; align-items: center; justify-content: space-between; gap: 12px;
           }
           .brand { display: flex; align-items: center; gap: 10px; }
-          .brand-mark { width: 36px; height: 36px; border-radius: 12px; background: linear-gradient(135deg, var(--primary-200), var(--primary)); color: #fff; display: grid; place-items: center; box-shadow: var(--shadow-warm); }
-          .brand-name { font-size: 18px; font-weight: 700; color: var(--text); display: block; letter-spacing: -0.02em; }
+          .brand-logo-img { height: 32px; width: auto; display: block; }
           .brand-sub { font-size: 12px; color: var(--text-soft); display: block; }
           .th-user { display: flex; align-items: center; gap: 10px; }
           .th-user-name { font-size: 14px; font-weight: 600; color: var(--text-soft); }
@@ -220,9 +334,33 @@ export default function TherapistDashboard() {
           .th-field > span { font-size: 13px; font-weight: 600; color: var(--text-soft); }
           .th-field input { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
           .th-field input:focus { border-color: var(--primary); outline: none; }
-          .th-btn-primary { padding: 11px 20px; border: none; border-radius: 12px; background: var(--primary); color: #fff; font-weight: 600; cursor: pointer; box-shadow: 0 2px 10px rgba(112,130,56,0.2); transition: transform 0.12s; }
+          .th-btn-primary { display: inline-flex; align-items: center; gap: 6px; padding: 11px 20px; border: none; border-radius: 12px; background: var(--primary); color: #fff; font-weight: 600; cursor: pointer; box-shadow: 0 2px 10px rgba(112,130,56,0.2); transition: transform 0.12s; }
           .th-btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
           .th-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+          .th-link-form { display: flex; gap: 10px; padding: 18px 20px 8px; flex-wrap: wrap; }
+          .th-link-form input { flex: 1 1 220px; padding: 11px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+          .th-link-form input:focus { border-color: var(--primary); outline: none; }
+          .th-link-error { margin: 0; padding: 0 20px 8px; font-size: 13px; color: var(--danger); }
+          .th-patient-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px 20px; }
+          .th-empty-inline { margin: 0; font-size: 13px; color: var(--text-soft); }
+          .th-patient-chip { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 13px; font-weight: 600; color: var(--text); }
+          .th-avatar.small { width: 26px; height: 26px; font-size: 12px; }
+          .th-unlink-btn { border: none; background: transparent; color: var(--text-muted); cursor: pointer; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; transition: background 0.15s, color 0.15s; }
+          .th-unlink-btn:hover { background: var(--danger-bg); color: var(--danger); }
+
+          .th-alerts-card { border-color: rgba(196,91,74,0.3); }
+          .th-section-head.alert { border-bottom-color: rgba(196,91,74,0.15); }
+          .th-section-icon.alert { background: var(--danger-bg); color: var(--danger); }
+          .th-alert-list { display: flex; flex-direction: column; gap: 10px; padding: 14px 20px 20px; }
+          .th-alert-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid rgba(196,91,74,0.25); border-radius: var(--radius-sm); background: var(--danger-bg); }
+          .th-alert-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+          .th-alert-patient { font-size: 14px; font-weight: 700; color: var(--text); }
+          .th-alert-reason { font-size: 12.5px; color: var(--danger); font-weight: 600; }
+          .th-alert-excerpt { font-size: 12.5px; color: var(--text-soft); font-style: italic; }
+          .th-alert-time { font-size: 11px; color: var(--text-muted); }
+          .th-ack-btn { display: flex; align-items: center; gap: 5px; padding: 8px 14px; border: 1px solid rgba(196,91,74,0.3); border-radius: 999px; background: var(--surface); color: var(--danger); font-size: 12.5px; font-weight: 700; cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
+          .th-ack-btn:hover { background: var(--danger); color: #fff; }
 
           .th-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
           @media (min-width: 720px) { .th-stats { grid-template-columns: repeat(4, 1fr); } }

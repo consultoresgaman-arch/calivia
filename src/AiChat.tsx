@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mic, Send, Heart } from 'lucide-react';
+import { Mic, Send, Heart, Zap, Volume2 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import type { ChatLog } from './lib/types';
+import { isCheckoutConfigured, openCheckout } from './lib/payments';
 
-const SYSTEM_NOTE = 'Soy un espacio de acompañamiento, no sustituyo la atención profesional.';
+const SYSTEM_NOTE = 'Soy Calivia (la unión de calma y alivio). Un espacio de acompañamiento, no sustituyo la atención profesional.';
+
+const QUICK_PROMPTS = [
+  'No sé por dónde empezar',
+  'Necesito un momento para respirar',
+  'Hoy fue un día difícil',
+  'Solo quiero que alguien me escuche',
+];
 
 const FALLBACK_GREETINGS = {
-  morning: 'Hola, ¿cómo dormiste? ¿Cómo arranca tu día?',
-  afternoon: 'Hola, ¿cómo va tu día? ¿Ya almorzaste?',
-  night: 'Hola, ¿cómo estuvo tu jornada? Ya va bajando el sol...',
+  morning: 'Buenos días, soy Calivia. ¿Cómo te sientes para comenzar tu día?',
+  afternoon: 'Hola, buenas tardes, soy Calivia. Recuerda que debes comer, o ¿ya has comido? ¿Cómo va tu día?',
+  night: 'Hola, soy Calivia. ¿Cómo estuvo tu día hoy? ¿Ya has cenado?',
 };
 
 function getTimeOfDay(): 'morning' | 'afternoon' | 'night' {
@@ -46,6 +54,9 @@ function generateClientFallback(message: string, conversation: ChatLog[]): strin
   const assistantTurns = conversation.filter((m) => m.role === 'assistant');
   const lastAssistant = assistantTurns[assistantTurns.length - 1];
 
+  if (lower.includes('significa') && (lower.includes('calivia') || lower.includes('tu nombre'))) {
+    return 'Calivia nace de la unión entre calma y alivio. Es el significado real de este espacio: un refugio diseñado para ofrecerte exactamente eso, un lugar donde puedas pausar y encontrar sosiego.';
+  }
   if (lower.includes('diagnóstico') || lower.includes('diagnostico') || lower.includes('tengo algo')) {
     return 'No tengo la capacidad de dar un diagnóstico clínico, pero puedo acompañarte. Para una evaluación profesional, te invito a agendar una sesión con el especialista: https://calendly.com/consultoresgaman/30min';
   }
@@ -66,7 +77,6 @@ function generateClientFallback(message: string, conversation: ChatLog[]): strin
   return SOCRATIC_FOLLOWUPS[message.length % SOCRATIC_FOLLOWUPS.length];
 }
 
-// Speech Recognition typing
 interface SpeechRecognitionResult {
   transcript: string;
 }
@@ -87,12 +97,13 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
 
 interface Props {
   userId: string;
+  name?: string | null;
   messagesSent: number;
   maxFree: number;
   onMessageSent: () => void;
 }
 
-export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }: Props) {
+export default function AiChat({ userId, name, messagesSent, maxFree, onMessageSent }: Props) {
   const [messages, setMessages] = useState<ChatLog[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
@@ -101,6 +112,10 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
   const [recording, setRecording] = useState(false);
   const [usingFallback, setUsingFallback] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(true);
+  
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceUri, setSelectedVoiceUri] = useState<string>('');
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
@@ -109,7 +124,48 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) setVoiceSupported(false);
-  }, []);
+
+    function loadVoices() {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        const allVoices = window.speechSynthesis.getVoices();
+        const spanishVoices = allVoices.filter((v) => v.lang.toLowerCase().includes('es'));
+        
+        if (spanishVoices.length > 0) {
+          setVoices(spanishVoices);
+          if (!selectedVoiceUri) {
+            const preferred = spanishVoices.find((v) => v.lang.toLowerCase().includes('co') || v.lang.toLowerCase().includes('419')) || spanishVoices[0];
+            setSelectedVoiceUri(preferred.voiceURI);
+          }
+        } else if (allVoices.length > 0) {
+          setVoices(allVoices);
+          if (!selectedVoiceUri) setSelectedVoiceUri(allVoices[0].voiceURI);
+        }
+      }
+    }
+
+    loadVoices();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+  }, [selectedVoiceUri]);
+
+  function speakResponse(text: string) {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      if (voices.length > 0 && selectedVoiceUri) {
+        const chosenVoice = voices.find((v) => v.voiceURI === selectedVoiceUri);
+        if (chosenVoice) {
+          utterance.voice = chosenVoice;
+        }
+      }
+
+      utterance.rate = 0.93;
+      utterance.pitch = 0.96;
+      window.speechSynthesis.speak(utterance);
+    }
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -152,7 +208,7 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
     stopRecognition();
 
     const recognition = new SR();
-    recognition.lang = 'es-ES';
+    recognition.lang = 'es-CO';
     recognition.continuous = false;
     recognition.interimResults = true;
 
@@ -188,7 +244,11 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
     recognition.onend = () => {
       setRecording(false);
       recognitionRef.current = null;
-      if (finalTranscript.trim()) setInput(finalTranscript.trim());
+      const textToSend = finalTranscript.trim();
+      if (textToSend) {
+        setInput('');
+        send(null, textToSend, true);
+      }
     };
 
     recognitionRef.current = recognition;
@@ -202,9 +262,9 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
     }
   }
 
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
-    const text = input.trim();
+  async function send(e: React.FormEvent | null, overrideText?: string, isVoice: boolean = false) {
+    e?.preventDefault();
+    const text = (overrideText ?? input).trim();
     if (!text || sending || limitReached) return;
     stopRecognition();
     setError(null);
@@ -254,6 +314,11 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
       setUsingFallback(isFallback);
       const assistantLog: ChatLog = { id: `a-${Date.now()}`, user_id: userId, role: 'assistant', content: reply, created_at: new Date().toISOString() };
       setMessages((m) => [...m, assistantLog]);
+      
+      if (isVoice) {
+        speakResponse(reply);
+      }
+
       onMessageSent();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error inesperado';
@@ -271,10 +336,32 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
         <div className="chat-icon">
           <Heart size={18} strokeWidth={2} />
         </div>
-        <div>
-          <h2>Acompañamiento</h2>
-          <p>Escribe o habla con el micrófono. {SYSTEM_NOTE}</p>
+        <div className="chat-head-info">
+          <h2>Calivia</h2>
+          <p>{SYSTEM_NOTE}</p>
         </div>
+      </div>
+
+      <div className="voice-selector-bar">
+        <label htmlFor="voice-select">
+          <Volume2 size={14} /> Voz de Calivia:
+        </label>
+        <select
+          id="voice-select"
+          value={selectedVoiceUri}
+          onChange={(e) => setSelectedVoiceUri(e.target.value)}
+          aria-label="Seleccionar voz de Calivia"
+        >
+          {voices.length > 0 ? (
+            voices.map((v) => (
+              <option key={v.voiceURI} value={v.voiceURI}>
+                {v.name} ({v.lang})
+              </option>
+            ))
+          ) : (
+            <option value="">Cargando voces...</option>
+          )}
+        </select>
       </div>
 
       <div className="chat-body" ref={scrollRef}>
@@ -285,47 +372,83 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
             <div className="chat-welcome-icon">
               <Heart size={24} strokeWidth={1.5} />
             </div>
-            <p>Hola. Aquí puedes escribir o hablar lo que sientes.</p>
+            <p>{FALLBACK_GREETINGS[getTimeOfDay()]}</p>
             <p className="chat-welcome-sub">Te escucho, sin prisa.</p>
+            <div className="quick-prompts">
+              {QUICK_PROMPTS.map((q) => (
+                <button key={q} type="button" className="quick-chip" onClick={() => send(null, q, false)} disabled={sending || limitReached}>
+                  {q}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           messages.map((m) => (
-            <div key={m.id} className={`bubble ${m.role}`}>
-              <div className="bubble-text">{m.content}</div>
+            <div key={m.id} className={`msg-row ${m.role}`}>
+              {m.role === 'assistant' && (
+                <div className="msg-avatar"><Heart size={12} strokeWidth={2} /></div>
+              )}
+              <div className={`bubble ${m.role}`}>
+                <div className="bubble-text">{m.content}</div>
+              </div>
             </div>
           ))
         )}
         {sending && (
-          <div className="bubble assistant">
-            <div className="bubble-text">
-              <span className="typing-dot" /> <span className="typing-dot" style={{ animationDelay: '0.2s' }} /> <span className="typing-dot" style={{ animationDelay: '0.4s' }} />
+          <div className="msg-row assistant">
+            <div className="msg-avatar"><Heart size={12} strokeWidth={2} /></div>
+            <div className="bubble assistant">
+              <div className="bubble-text">
+                <span className="typing-dot" /> <span className="typing-dot" style={{ animationDelay: '0.2s' }} /> <span className="typing-dot" style={{ animationDelay: '0.4s' }} />
+              </div>
             </div>
           </div>
         )}
       </div>
 
+      {messages.length > 0 && !limitReached && (
+        <div className="quick-prompts quick-prompts-slim">
+          {QUICK_PROMPTS.map((q) => (
+            <button key={q} type="button" className="quick-chip" onClick={() => send(null, q, false)} disabled={sending}>
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+
       {usingFallback && !sending && (
         <div className="chat-fallback-note">
-          El asistente está en modo de respaldo. Tus mensajes siguen siendo escuchados.
+          Calivia está en modo de respaldo. Tus mensajes siguen siendo escuchados.
         </div>
       )}
       {error && <div className="chat-error">{error}</div>}
       {limitReached && !sending && (
         <div className="chat-limit">
-          Has alcanzado el límite diario de la Versión Calma. Explora Calivia Ilimitada arriba.
+          <p>Has alcanzado el límite diario de la Versión Calma.</p>
+          {isCheckoutConfigured() ? (
+            <button
+              className="chat-limit-cta"
+              type="button"
+              onClick={() => openCheckout({ userId, name })}
+            >
+              <Zap size={14} strokeWidth={2.5} /><span>Desbloquear Calivia Ilimitada</span>
+            </button>
+          ) : (
+            <p className="chat-limit-sub">Explora Calivia Ilimitada arriba.</p>
+          )}
         </div>
       )}
 
-      <form className="chat-input" onSubmit={send}>
+      <form className="chat-input" onSubmit={(e) => send(e, undefined, false)}>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={limitReached ? 'Límite diario alcanzado…' : recording ? 'Escuchando… habla ahora' : 'Escribe lo que traes dentro…'}
           disabled={sending || limitReached}
-          aria-label="Mensaje al asistente"
+          aria-label="Mensaje a Calivia"
           rows={1}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e); }
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e, undefined, false); }
           }}
         />
         <button
@@ -334,7 +457,7 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
           onClick={startVoiceInput}
           disabled={limitReached || !voiceSupported}
           aria-label={recording ? 'Detener grabación' : 'Hablar al micrófono'}
-          title={voiceSupported ? 'Dictar por voz' : 'Tu navegador no soporta dictado por voz'}
+          title={voiceSupported ? 'Dictar por voz y recibir respuesta hablada' : 'Tu navegador no soporta dictado por voz'}
         >
           <Mic size={18} strokeWidth={2} />
         </button>
@@ -345,7 +468,7 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
 
       <style>{`
         .chat-card { display: flex; flex-direction: column; height: 100%; min-height: 380px; }
-        .chat-head { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--border-soft); }
+        .chat-head { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-soft); }
         .chat-icon {
           width: 38px; height: 38px; border-radius: 12px;
           background: rgba(112,130,56,0.12); color: var(--primary);
@@ -354,9 +477,20 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
         .chat-head h2 { margin: 0; font-size: 16px; font-weight: 700; color: var(--text); }
         .chat-head p { margin: 2px 0 0; font-size: 12px; color: var(--text-soft); }
 
+        .voice-selector-bar {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 8px 10px; margin-top: 8px; background: var(--surface-2);
+          border-radius: 8px; border: 1px solid var(--border-soft); font-size: 12px; color: var(--text-soft);
+        }
+        .voice-selector-bar label { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+        .voice-selector-bar select {
+          padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+          background: var(--surface); color: var(--text); font-size: 12px; max-width: 180px;
+        }
+
         .chat-body {
           flex: 1; overflow-y: auto; padding: 16px 4px;
-          display: flex; flex-direction: column; gap: 10px;
+          display: flex; flex-direction: column; gap: 14px;
         }
         .chat-empty { text-align: center; color: var(--text-soft); font-size: 14px; padding: 20px; }
         .chat-welcome {
@@ -371,24 +505,43 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
         .chat-welcome p { margin: 0; font-size: 15px; color: var(--text); font-weight: 500; }
         .chat-welcome-sub { font-size: 13px !important; color: var(--text-soft) !important; font-weight: 400 !important; }
 
+        .quick-prompts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
+        .quick-prompts-slim { justify-content: flex-start; padding: 10px 2px 0; margin-top: 0; }
+        .quick-chip {
+          padding: 8px 14px; border: 1px solid var(--border); border-radius: 999px;
+          background: var(--surface-2); color: var(--text-soft);
+          font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+          transition: border-color 0.15s, color 0.15s, background 0.15s;
+        }
+        .quick-chip:hover:not(:disabled) { border-color: var(--primary-200); color: var(--primary-600); background: rgba(112,130,56,0.06); }
+        .quick-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+
+        .msg-row { display: flex; align-items: flex-end; gap: 8px; }
+        .msg-row.user { justify-content: flex-end; }
+        .msg-avatar {
+          width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+          background: rgba(112,130,56,0.12); color: var(--primary);
+          display: grid; place-items: center;
+        }
+
         .bubble {
-          max-width: 82%; padding: 10px 14px;
-          border-radius: 16px; font-size: 14px; line-height: 1.55;
+          max-width: 78%; padding: 11px 15px;
+          border-radius: 18px; font-size: 14px; line-height: 1.6;
           animation: fadeIn 0.25s ease;
+          box-shadow: 0 1px 2px rgba(58,58,54,0.04);
         }
         .bubble.user {
-          align-self: flex-end;
           background: var(--primary);
           color: #fff;
-          border-bottom-right-radius: 5px;
+          border-bottom-right-radius: 6px;
         }
         .bubble.assistant {
-          align-self: flex-start;
           background: var(--surface-2);
           color: var(--text);
           border: 1px solid var(--border-soft);
-          border-bottom-left-radius: 5px;
+          border-bottom-left-radius: 6px;
         }
+        .bubble-text { white-space: pre-wrap; }
         .typing-dot {
           display: inline-block; width: 7px; height: 7px;
           border-radius: 50%; background: var(--text-muted);
@@ -408,10 +561,22 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
           border: 1px solid rgba(184,92,74,0.2);
         }
         .chat-limit {
-          margin: 8px 2px; padding: 10px 14px;
+          margin: 8px 2px; padding: 12px 14px;
           background: rgba(196,154,90,0.1); color: var(--warn);
           border-radius: var(--radius-sm); font-size: 13px; text-align: center;
+          display: flex; flex-direction: column; align-items: center; gap: 8px;
         }
+        .chat-limit p { margin: 0; }
+        .chat-limit-sub { color: var(--warn); }
+        .chat-limit-cta {
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 9px 18px; border: none; border-radius: 999px;
+          background: var(--primary); color: #fff;
+          font-size: 13px; font-weight: 700; cursor: pointer;
+          transition: transform 0.12s, box-shadow 0.15s;
+          box-shadow: 0 2px 10px rgba(112,130,56,0.25);
+        }
+        .chat-limit-cta:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(112,130,56,0.3); }
 
         .chat-input {
           display: flex; gap: 8px; padding-top: 12px;
@@ -440,10 +605,17 @@ export default function AiChat({ userId, messagesSent, maxFree, onMessageSent }:
           border: 1px solid var(--border);
         }
         .mic-btn:hover:not(:disabled) { background: var(--muted); color: var(--primary); }
+        .mic-btn:active:not(:disabled) { transform: scale(0.86); }
         .mic-btn.rec {
           background: var(--secondary); color: #fff;
           border-color: var(--secondary);
-          animation: breathe 1.5s ease-in-out infinite;
+          box-shadow: 0 0 0 0 rgba(140,138,126,0.4);
+          animation: breathe 1.5s ease-in-out infinite, micRing 1.5s ease-out infinite;
+        }
+        @keyframes micRing {
+          0% { box-shadow: 0 0 0 0 rgba(140,138,126,0.35); }
+          70% { box-shadow: 0 0 0 12px rgba(140,138,126,0); }
+          100% { box-shadow: 0 0 0 0 rgba(140,138,126,0); }
         }
         .mic-btn.disabled { opacity: 0.35; cursor: not-allowed; }
         .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }

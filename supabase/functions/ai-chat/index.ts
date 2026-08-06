@@ -7,58 +7,96 @@ const corsHeaders = {
 };
 
 const SYSTEM_PROMPT = [
-  'Eres el asistente emocional de "Calivia", un refugio digital.',
-  'Actúas como un regulador externo y un espejo seguro para la persona.',
+  'Eres un acompañante humano, cálido, cercano y profundamente empático en "Calivia", un refugio digital.',
+  'Hablas de forma natural, sencilla y conversacional, exactamente como un amigo sabio o una persona real que escucha con el corazón abierto y sin prisas.',
   '',
-  'TONO: Cálido, profundamente humano, cercano. Frases breves y directas.',
-  'PRIORIZA la validación emocional inmediata antes que cualquier consejo.',
-  'Ejemplo de validación: "Es normal que sientas el pecho oprimido ahora mismo".',
+  'TONO Y ESTILO:',
+  '- CERO ROBOTIZMO: NUNCA uses frases de manual clínico o de cuestionario automático (como "Lamento que hayas tenido un día así... Es normal sentirse abrumado... ¿Qué fue lo más difícil?"). Eso se siente artificial y aleja.',
+  '- SÉ NATURAL Y HUMANO: Si el usuario dice que tuvo un mal día, responde como una persona real. Ejemplo: "Pucha, qué mal... Cuéntame, ¿qué pasó?" o "Te escucho, no estás solo. Tómate tu tiempo".',
+  '- ESPACIO PARA LA DESCARGA: Permite que la persona hable y suelte lo que siente. No la bombardees con preguntas inmediatamente. Deja que la conversación fluya orgánicamente.',
+  '- MÉTODO SOCRÁTICO SUTIL: Solo cuando notes que la persona ya se desahogó y la charla avanzó, introduce preguntas reflexivas de forma muy natural, jamás como una pauta rígida o un test.',
+  '- Brevedad: Frases breves y directas, de 2 a 3 frases máximo por respuesta.',
   '',
   'REGLAS ESTRICTAS:',
-  'CERO discursos teóricos largos. Máximo 2-3 frases por respuesta.',
-  'CERO diagnósticos. No evalúas patologías ni sugieres medicación.',
-  'CERO tonos robóticos o condescendientes. Habla como un humano que realmente se preocupa.',
-  'CERO listas o pasos numerados. Solo conversación natural.',
-  'CERO frases de manual como "comprendo cómo te sientes" — usa lenguaje fresco y auténtico.',
+  '- CERO discursos teóricos largos.',
+  '- CERO diagnósticos. No evalúas patologías ni sugieres medicación.',
+  '- CERO tonos condescendientes o frases de manual como "comprendo cómo te sientes" — usa lenguaje fresco y auténtico.',
+  '- CERO listas o pasos numerados. Solo conversación humana.',
   '',
-  'MÉTODO:',
-  '1. Primero valida lo que siente la persona en una frase breve y directa.',
-  '2. Luego haz UNA pregunta corta que la ayude a bajar al cuerpo o al momento presente.',
-  '3. NO des soluciones prematuras. Solo contiene y refleja.',
+  'RIESGO: Si detectas riesgo inmediato (autolesión, ideación suicida), mantén la calma, muestra cercanía humana real, valida y reconduce suavemente a usar el botón de respiro urgente o contactar a alguien de confianza.',
   '',
-  'RIESGO: Si detectas riesgo inmediato (autolesión, ideación suicida), mantén la calma,',
-  'valida, y reconduce suavemente a usar el botón de respiro urgente o contactar a alguien de confianza.',
-  '',
-  'DERIVACIÓN: Si pide ayuda profesional, comparte: https://calendly.com/consultoresgaman/30min',
+  'DERIVACIÓN: Si pide ayuda profesional o notas que es momento de dar un paso más profundo, comparte con naturalidad: https://calendly.com/consultoresgaman/30min',
 ].join('\n');
 
 const FALLBACK_REPLIES = [
-  'Es normal que sientas eso ahora mismo. Quédate aquí. ¿Puedes notar dónde lo sientes en el cuerpo?',
-  'Te escucho. Eso que sientes pesa, y tiene sentido que pese. ¿Cómo está tu respiración ahora?',
-  'Lo que me cuentas es difícil. No tienes que resolverlo en este momento. ¿Qué necesitas ahora mismo, hablar o solo estar aquí?',
-  'Gracias por decirlo. Eso requiere valor. ¿Puedes poner una mano en el pecho y sentir cómo sube y baja?',
-  'Entiendo. Estás cargando mucho. Permítete soltar un poco. ¿Qué parte del cuerpo está más tensa?',
+  'Pucha, qué mal... Cuéntame, ¿qué pasó hoy?',
+  'Te escucho, no estás solo en esto. Tómate tu tiempo para respirar y soltar.',
+  'Eso que cargpes pesa harto. ¿Quieres contarme un poco más de lo que pasa por tu cabeza?',
+  'Estoy aquí contigo, de verdad. ¿Qué necesitas en este momento para estar un poco más tranquilo?',
+  'Te leo. A veces el día simplemente nos sobrepasa. ¿Qué parte es la que más te agota?',
 ];
+
+// Lexicón simple de palabras clave de riesgo. Esto es una heurística de
+// texto, NO una evaluación clínica: puede tener falsos negativos (frases de
+// riesgo reales que no calcen) y falsos positivos. Sirve para avisar al
+// psicólogo vinculado, nunca para decidir nada por sí sola.
+const RISK_KEYWORDS = [
+  'suicid', 'quitarme la vida', 'no quiero seguir viviendo', 'no quiero vivir',
+  'terminar con todo', 'terminar con mi vida', 'hacerme daño', 'hacerme dano',
+  'autolesion', 'autolesión', 'cortarme', 'no aguanto más', 'no aguanto mas',
+  'quiero desaparecer', 'ya no puedo más', 'ya no puedo mas', 'no vale la pena vivir',
+  'no quiero estar aquí', 'no quiero estar aqui',
+];
+
+function detectRiskKeyword(text: string): string | null {
+  const normalized = text.toLowerCase();
+  for (const kw of RISK_KEYWORDS) {
+    if (normalized.includes(kw)) return kw;
+  }
+  return null;
+}
+
+// Best-effort: si falla cualquier paso acá, no debe romper el chat.
+async function maybeCreateRiskAlert(supabase: ReturnType<typeof createClient>, userId: string, message: string) {
+  try {
+    const matched = detectRiskKeyword(message);
+    if (!matched) return;
+    const { data: link } = await supabase
+      .from('patient_links')
+      .select('psychologist_id')
+      .eq('patient_id', userId)
+      .maybeSingle();
+    if (!link) return;
+    await supabase.from('risk_alerts').insert({
+      patient_id: userId,
+      psychologist_id: link.psychologist_id,
+      reason: `Palabra clave de riesgo detectada: "${matched}"`,
+      message_excerpt: message.slice(0, 200),
+    });
+  } catch (err) {
+    console.error('maybeCreateRiskAlert failed:', err);
+  }
+}
 
 function pickFallback(msg: string): string {
   const lower = msg.toLowerCase();
   if (lower.includes('pecho') || lower.includes('oprim') || lower.includes('ahog')) {
-    return 'Es normal que sientas el pecho oprimido ahora mismo. Tu cuerpo te está diciendo algo. ¿Puedes respirar lento conmigo, solo una?';
+    return 'Pucha, se siente feo cuando el pecho se aprieta así. Quédate aquí conmigo, respira hondo y dime si puedes notar dónde pesa más.';
   }
   if (lower.includes('miedo') || lower.includes('ansied') || lower.includes('panico') || lower.includes('pánico')) {
-    return 'El miedo te recorre entero, lo sé. Estás a salvo en este momento. ¿Puedes mirar a tu alrededor y nombrar tres cosas que ves?';
+    return 'El miedo recorre todo el cuerpo, lo sé bien. Pero aquí estás seguro. ¿Ves algo a tu alrededor que te ayude a volver al presente?';
   }
   if (lower.includes('triste') || lower.includes('solo') || lower.includes('llorar') || lower.includes('vacio') || lower.includes('vacío')) {
-    return 'Lo que sientes es real y tiene peso. No estás solo en esto. ¿Puedes dejar que salga lo que necesite salir, sin pelearlo?';
+    return 'Ese vacío pesa un montón. Deja que salga lo que tenga que salir, no tienes que disimular conmigo.';
   }
   if (lower.includes('cansado') || lower.includes('agotado') || lower.includes('no puedo más') || lower.includes('no puedo mas')) {
-    return 'Se nota que estás al límite. Está bien decir basta. ¿Qué pasaría si por hoy solo descansas, sin más?';
+    return 'Se nota que estás al límite de tus fuerzas. Está bien parar un segundo. ¿Qué pasaría si por ahora solo te permites descansar?';
   }
   if (lower.includes('diagnóstico') || lower.includes('diagnostico') || lower.includes('tengo algo')) {
-    return 'No puedo darte un diagnóstico, pero puedo acompañarte. Para una evaluación profesional: https://calendly.com/consultoresgaman/30min';
+    return 'No puedo darte un diagnóstico, pero sí acompañarte de cerca. Si quieres dar el paso con un profesional, puedes agendar acá: https://calendly.com/consultoresgaman/30min';
   }
   if (lower.includes('suicid') || lower.includes('hacerme daño') || lower.includes('no quiero seguir')) {
-    return 'Lo que me cuentas me importa mucho. Estoy contigo. Ahora mismo necesitas sostén humano: usa el botón de respiro urgente o llama a alguien de confianza. Tu vida importa.';
+    return 'Lo que me dices me importa muchísimo y no estás solo. Por favor, usa el botón de respiro urgente de la app o habla con alguien de confianza ahora mismo. Tu vida vale.';
   }
   return FALLBACK_REPLIES[msg.length % FALLBACK_REPLIES.length];
 }
@@ -76,6 +114,8 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
+    await maybeCreateRiskAlert(supabase, userId, message);
+
     const { data: history, error: histErr } = await supabase
       .from('chat_logs')
       .select('role, content, created_at')
@@ -87,6 +127,28 @@ Deno.serve(async (req: Request) => {
     const convo = (history ?? []).map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
     const apiKey = Deno.env.get('OPENAI_API_KEY');
 
+    // Memoria entre sesiones: los reportes diarios ya resumen patrones de
+    // ánimo y palabras clave. Se los pasamos como contexto silencioso para
+    // que mantenga continuidad, nunca para que los recite o los mencione
+    // como fuente ("según tus reportes...").
+    let memoryContext = '';
+    const { data: pastReports } = await supabase
+      .from('ai_reports')
+      .select('report_date, mood_summary, keywords')
+      .eq('user_id', userId)
+      .order('report_date', { ascending: false })
+      .limit(5);
+    if (pastReports && pastReports.length > 0) {
+      const lines = pastReports.map((r) =>
+        `- ${r.report_date}: ${r.mood_summary}${r.keywords?.length ? ` (patrones: ${r.keywords.join(', ')})` : ''}`
+      );
+      memoryContext = [
+        '',
+        'MEMORIA DE SESIONES ANTERIORES (contexto interno para continuidad; NUNCA la recites ni digas frases como "según tus reportes" — solo úsala para comprender mejor a la persona de forma natural):',
+        ...lines,
+      ].join('\n');
+    }
+
     if (!apiKey) {
       const fallback = pickFallback(message);
       await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: fallback });
@@ -94,7 +156,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const messages = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: SYSTEM_PROMPT + memoryContext },
       ...convo,
       { role: 'user', content: message },
     ];
@@ -102,7 +164,7 @@ Deno.serve(async (req: Request) => {
     const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: 'gpt-4o-mini', messages, temperature: 0.7, max_tokens: 150 }),
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages, temperature: 0.8, max_tokens: 150 }),
     });
 
     if (!aiRes.ok) {

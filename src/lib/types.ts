@@ -2,10 +2,10 @@ export type Role = 'patient' | 'psychologist';
 
 export interface Profile {
   id: string;
-  email: string;
-  full_name: string | null;
+  full_name: string;
   role: Role;
   country: string | null;
+  is_premium: boolean;
   created_at: string;
 }
 
@@ -22,6 +22,25 @@ export interface ChatLog {
   user_id: string;
   role: 'user' | 'assistant';
   content: string;
+  created_at: string;
+}
+
+export interface RiskAlert {
+  id: string;
+  patient_id: string;
+  psychologist_id: string;
+  reason: string;
+  message_excerpt: string | null;
+  acknowledged: boolean;
+  created_at: string;
+}
+
+export interface TaskItem {
+  id: string;
+  user_id: string;
+  title: string;
+  due_at: string | null;
+  done: boolean;
   created_at: string;
 }
 

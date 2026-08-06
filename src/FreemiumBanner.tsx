@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { Sparkles, X, Zap, Brain, MessageCircle, Music, Gamepad2, TrendingUp, Headphones } from 'lucide-react';
+import { isCheckoutConfigured, openCheckout } from './lib/payments';
 
 interface Props {
   messagesToday: number;
   maxFree: number;
+  userId: string;
+  name?: string | null;
 }
 
 interface Benefit {
@@ -52,13 +55,17 @@ const BENEFITS: Benefit[] = [
   },
 ];
 
-export default function FreemiumBanner({ messagesToday, maxFree }: Props) {
+export default function FreemiumBanner({ messagesToday, maxFree, userId, name }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed) return null;
   const remaining = Math.max(0, maxFree - messagesToday);
   const pct = Math.min(100, (messagesToday / maxFree) * 100);
+
+  function goToCheckout() {
+    openCheckout({ userId, name });
+  }
 
   return (
     <>
@@ -103,8 +110,8 @@ export default function FreemiumBanner({ messagesToday, maxFree }: Props) {
             </div>
 
             <div className="fm-price">
-              <span className="fm-amount">$6.000</span>
-              <span className="fm-period">CLP / mes</span>
+              <span className="fm-amount">$8</span>
+              <span className="fm-period">USD / mes</span>
             </div>
 
             <div className="fm-benefit-grid">
@@ -128,9 +135,12 @@ export default function FreemiumBanner({ messagesToday, maxFree }: Props) {
               })}
             </div>
 
-            <button className="fm-cta" type="button">
+            <button className="fm-cta" type="button" onClick={goToCheckout} disabled={!isCheckoutConfigured()}>
               Comenzar mes de prueba
             </button>
+            {!isCheckoutConfigured() && (
+              <p className="fm-fine">Pasarela de pago en configuración. Vuelve pronto.</p>
+            )}
             <p className="fm-fine">Cancela cuando quieras. Sin compromiso.</p>
           </div>
         </div>
@@ -290,6 +300,7 @@ export default function FreemiumBanner({ messagesToday, maxFree }: Props) {
           transition: transform 0.12s, box-shadow 0.15s;
           box-shadow: 0 4px 16px rgba(112,130,56,0.25);
         }
+        .fm-cta:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
         .fm-cta:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(112,130,56,0.3); }
         .fm-cta:active { transform: scale(0.99); }
         .fm-fine { text-align: center; margin: 12px 0 0; font-size: 12px; color: var(--text-muted); }

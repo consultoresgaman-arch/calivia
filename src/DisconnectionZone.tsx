@@ -1,23 +1,33 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { X, Volume2, VolumeX, Leaf, CloudRain } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react';
+import { X, Volume2, VolumeX, Circle, Leaf, CloudRain, Lock } from 'lucide-react';
+import { openCheckout } from './lib/payments';
 
 interface Props {
   open: boolean;
   onClose: () => void;
   isPremium: boolean;
+  userId: string;
+  name?: string | null;
 }
 
-type GameId = 'dissolve' | 'trace' | 'raindrop';
+type GameId = 'spheres' | 'trace' | 'raindrop';
 
-interface Particle {
+interface Sphere {
   id: number;
   x: number;
   y: number;
   size: number;
-  opacity: number;
-  dissipated: boolean;
-  driftX: number;
-  driftY: number;
+  color: string;
+  matched: boolean;
+  spawning: boolean;
+}
+
+interface Drop {
+  id: number;
+  x: number;
+  y: number;
+  speed: number;
+  popped: boolean;
 }
 
 interface Ripple {
@@ -33,22 +43,29 @@ interface TracePoint {
   age: number;
 }
 
-const MAX_PARTICLES = 24;
-const PARTICLE_COLORS = ['#A8B87E', '#C4C2B8', '#E5D9B6', '#B5BBA8', '#D0CCC0'];
+const SPHERE_COLORS = ['#A8B87E', '#8FAF6B', '#C9A66B', '#B08BC0', '#6FA8B8'];
+const PAIR_COUNT = 4;
+const MAX_DROPS = 9;
 
-export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
-  const [game, setGame] = useState<GameId>('dissolve');
+export default function DisconnectionZone({ open, onClose, isPremium, userId, name }: Props) {
+  const [game, setGame] = useState<GameId>('spheres');
   const [soundOn, setSoundOn] = useState(false);
-  const [particles, setParticles] = useState<Particle[]>([]);
+
+  const [spheres, setSpheres] = useState<Sphere[]>([]);
+  const [dragFrom, setDragFrom] = useState<Sphere | null>(null);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+
+  const [drops, setDrops] = useState<Drop[]>([]);
+  const wipingRef = useRef(false);
+
   const [ripples, setRipples] = useState<Ripple[]>([]);
   const [tracePoints, setTracePoints] = useState<TracePoint[]>([]);
-  const [drops, setDrops] = useState<{ id: number; y: number }[]>([]);
-  const [cleared, setCleared] = useState(0);
+
   const audioRef = useRef<AudioContext | null>(null);
-  const nextId = useRef(0);
+  const nextSphereId = useRef(0);
+  const nextDropId = useRef(0);
   const nextRippleId = useRef(0);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const dragIdRef = useRef<number | null>(null);
   const tracingRef = useRef(false);
   const rafRef = useRef<number | null>(null);
 
@@ -73,64 +90,67 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
     } catch { /* ignore */ }
   }
 
-  // Dissolve game: spawn floating particles
+  function makeSphere(color: string): Sphere {
+    return {
+      id: nextSphereId.current++,
+      x: 12 + Math.random() * 76,
+      y: 14 + Math.random() * 66,
+      size: 46 + Math.random() * 20,
+      color,
+      matched: false,
+      spawning: true,
+    };
+  }
+
+  function settleSpawns() {
+    setTimeout(() => {
+      setSpheres((prev) => prev.map((s) => (s.spawning ? { ...s, spawning: false } : s)));
+    }, 30);
+  }
+
+  // Spheres game: spawn N matching color pairs
   useEffect(() => {
-    if (!open || game !== 'dissolve') return;
-    setParticles([]); setCleared(0);
-    const timer = setInterval(() => {
-      setParticles((prev) => {
-        const visible = prev.filter((p) => !p.dissipated);
-        if (visible.length >= MAX_PARTICLES) return prev;
-        const id = nextId.current++;
-        return [...prev, {
-          id, x: 8 + Math.random() * 84, y: 8 + Math.random() * 84,
-          size: 36 + Math.random() * 32, opacity: 0,
-          dissipated: false, driftX: 0, driftY: 0,
-        }];
-      });
-    }, 1200);
-    for (let i = 0; i < 6; i++) setTimeout(() => {
-      setParticles((prev) => [...prev, {
-        id: nextId.current++, x: 8 + Math.random() * 84, y: 8 + Math.random() * 84,
-        size: 36 + Math.random() * 32, opacity: 0, dissipated: false, driftX: 0, driftY: 0,
-      }]);
-    }, i * 200);
-    return () => clearInterval(timer);
+    if (!open || game !== 'spheres') return;
+    const colors = [...SPHERE_COLORS].sort(() => Math.random() - 0.5).slice(0, PAIR_COUNT);
+    const initial: Sphere[] = [];
+    colors.forEach((c) => { initial.push(makeSphere(c)); initial.push(makeSphere(c)); });
+    setSpheres(initial);
+    settleSpawns();
+    setDragFrom(null);
+    setDragPos(null);
   }, [open, game]);
 
-  // Dissolve animation
-  useEffect(() => {
-    if (!open || game !== 'dissolve') return;
-    function animate() {
-      setParticles((prev) => prev.map((p) => {
-        if (p.dissipated) return { ...p, opacity: Math.max(0, p.opacity - 0.04), x: p.x + p.driftX, y: p.y + p.driftY };
-        const opacity = Math.min(0.85, p.opacity + 0.02);
-        return { ...p, opacity };
-      }).filter((p) => p.opacity > 0.02));
-      rafRef.current = requestAnimationFrame(animate);
-    }
-    rafRef.current = requestAnimationFrame(animate);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [open, game]);
-
-  // Raindrop game
+  // Raindrop game: continuously spawn falling drops
   useEffect(() => {
     if (!open || game !== 'raindrop') return;
-    setCleared(0); setRipples([]);
-    let dropId = 0;
-    const timer = setInterval(() => {
-      const id = dropId++;
-      setDrops([{ id, y: 0 }]);
-      setTimeout(() => setDrops((d) => d.map((dr) => dr.id === id ? { ...dr, y: 100 } : dr)), 50);
-      setTimeout(() => {
-        setDrops((d) => d.filter((dr) => dr.id !== id));
-        setRipples((r) => [...r, { id: nextRippleId.current++, x: 20 + Math.random() * 60, y: 45 + Math.random() * 20, age: 0 }]);
-        playChime(396 + Math.random() * 80);
-        setCleared((c) => c + 1);
-      }, 2400);
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [open, game, soundOn]);
+    setDrops([]); setRipples([]);
+    function spawn() {
+      setDrops((prev) => {
+        const active = prev.filter((d) => !d.popped);
+        if (active.length >= MAX_DROPS) return prev;
+        return [...prev, {
+          id: nextDropId.current++, x: 8 + Math.random() * 84, y: -4,
+          speed: 0.26 + Math.random() * 0.18, popped: false,
+        }];
+      });
+    }
+    spawn();
+    const interval = setInterval(spawn, 850);
+    return () => clearInterval(interval);
+  }, [open, game]);
+
+  // Raindrop animation loop
+  useEffect(() => {
+    if (!open || game !== 'raindrop') return;
+    function tick() {
+      setDrops((prev) => prev
+        .map((d) => (d.popped ? d : { ...d, y: d.y + d.speed }))
+        .filter((d) => d.popped || d.y < 105));
+      rafRef.current = requestAnimationFrame(tick);
+    }
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [open, game]);
 
   useEffect(() => {
     if (ripples.length === 0) return;
@@ -143,7 +163,7 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
   // Trace game
   useEffect(() => {
     if (!open || game !== 'trace') return;
-    setTracePoints([]); setCleared(0);
+    setTracePoints([]);
     const interval = setInterval(() => {
       setTracePoints((prev) => prev.map((p) => ({ ...p, age: p.age + 1 })).filter((p) => p.age < 80));
     }, 50);
@@ -156,38 +176,70 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
     return { x: ((clientX - rect.left) / rect.width) * 100, y: ((clientY - rect.top) / rect.height) * 100 };
   }
 
-  function startDissolveDrag(e: React.PointerEvent, p: Particle) {
+  // --- Spheres: drag from one, release over its color twin to connect ---
+  function startSphereDrag(e: React.PointerEvent, s: Sphere) {
+    if (s.matched) return;
     e.preventDefault();
     (e.target as Element).setPointerCapture(e.pointerId);
-    dragIdRef.current = p.id;
+    setDragFrom(s);
+    setDragPos({ x: s.x, y: s.y });
   }
 
-  function moveDissolveDrag(e: React.PointerEvent) {
-    if (dragIdRef.current === null) return;
-    const pct = pointerToPercent(e.clientX, e.clientY);
-    setParticles((prev) => prev.map((p) => p.id === dragIdRef.current ? { ...p, x: pct.x, y: pct.y } : p));
+  function moveSphereDrag(e: React.PointerEvent) {
+    if (!dragFrom) return;
+    setDragPos(pointerToPercent(e.clientX, e.clientY));
   }
 
-  function endDissolveDrag(_e: React.PointerEvent) {
-    if (dragIdRef.current === null) return;
-    const p = particles.find((pp) => pp.id === dragIdRef.current);
-    if (p) {
-      const dx = (Math.random() - 0.5) * 2;
-      const dy = -1 - Math.random();
-      setParticles((prev) => prev.map((pp) => pp.id === p.id ? { ...pp, dissipated: true, driftX: dx, driftY: dy } : pp));
-      setCleared((c) => c + 1);
-      playChime(396 + Math.random() * 110);
+  function sphereAtPoint(clientX: number, clientY: number, excludeId: number): Sphere | null {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    for (const s of spheres) {
+      if (s.id === excludeId || s.matched) continue;
+      const cx = rect.left + (s.x / 100) * rect.width;
+      const cy = rect.top + (s.y / 100) * rect.height;
+      if (Math.hypot(clientX - cx, clientY - cy) <= s.size / 2 + 16) return s;
     }
-    dragIdRef.current = null;
+    return null;
   }
 
-  function tapParticle(p: Particle) {
-    if (p.dissipated) return;
-    setParticles((prev) => prev.map((pp) => pp.id === p.id ? { ...pp, dissipated: true, driftX: 0, driftY: -1 } : pp));
-    setCleared((c) => c + 1);
-    playChime(440 + Math.random() * 80);
+  function endSphereDrag(e: React.PointerEvent) {
+    if (!dragFrom) return;
+    const target = sphereAtPoint(e.clientX, e.clientY, dragFrom.id);
+    if (target && target.color === dragFrom.color) {
+      const a = dragFrom;
+      setSpheres((prev) => prev.map((s) => (s.id === a.id || s.id === target.id) ? { ...s, matched: true } : s));
+      playChime(440 + Math.random() * 80);
+      setTimeout(() => {
+        setSpheres((prev) => {
+          const rest = prev.filter((s) => s.id !== a.id && s.id !== target.id);
+          const color = SPHERE_COLORS[Math.floor(Math.random() * SPHERE_COLORS.length)];
+          return [...rest, makeSphere(color), makeSphere(color)];
+        });
+        settleSpawns();
+      }, 650);
+    }
+    setDragFrom(null);
+    setDragPos(null);
   }
 
+  // --- Raindrop: tap or swipe-wipe to pop drops ---
+  function popDrop(d: Drop) {
+    setDrops((prev) => prev.map((x) => (x.id === d.id ? { ...x, popped: true } : x)));
+    setRipples((r) => [...r, { id: nextRippleId.current++, x: d.x, y: d.y, age: 0 }]);
+    playChime(480 + Math.random() * 80);
+    setTimeout(() => setDrops((prev) => prev.filter((x) => x.id !== d.id)), 500);
+  }
+
+  function wipeHit(e: React.PointerEvent) {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const px = ((e.clientX - rect.left) / rect.width) * 100;
+    const py = ((e.clientY - rect.top) / rect.height) * 100;
+    const hit = drops.find((d) => !d.popped && Math.hypot(d.x - px, d.y - py) < 7);
+    if (hit) popDrop(hit);
+  }
+
+  // --- Trace ---
   function startTrace(e: React.PointerEvent) {
     tracingRef.current = true;
     addTracePoint(e);
@@ -202,7 +254,6 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
 
   function endTrace() {
     tracingRef.current = false;
-    setCleared((c) => c + 1);
   }
 
   function toggleSound() {
@@ -210,15 +261,32 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
     setSoundOn(!soundOn);
   }
 
-  function selectGame(g: GameId) {
-    if (g === 'trace' && !isPremium) return;
+  function selectGame(g: GameId, locked: boolean) {
+    if (locked) { openCheckout({ userId, name }); return; }
     setGame(g);
+  }
+
+  function handlePointerDown(e: React.PointerEvent) {
+    if (game === 'trace') startTrace(e);
+    else if (game === 'raindrop') { wipingRef.current = true; wipeHit(e); }
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    if (game === 'spheres') moveSphereDrag(e);
+    else if (game === 'trace') addTracePoint(e);
+    else if (game === 'raindrop' && wipingRef.current) wipeHit(e);
+  }
+
+  function handlePointerUp(e: React.PointerEvent) {
+    wipingRef.current = false;
+    if (game === 'spheres') endSphereDrag(e);
+    else if (game === 'trace') endTrace();
   }
 
   if (!open) return null;
 
   const games: { id: GameId; title: string; icon: typeof Leaf; locked: boolean }[] = [
-    { id: 'dissolve', title: 'Disolver', icon: Leaf, locked: false },
+    { id: 'spheres', title: 'Esferas', icon: Circle, locked: false },
     { id: 'raindrop', title: 'Lluvia', icon: CloudRain, locked: false },
     { id: 'trace', title: 'Trazar', icon: Leaf, locked: !isPremium },
   ];
@@ -227,7 +295,6 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
     <div className="dz-overlay">
       <div className="dz-bar">
         <button className="dz-close" onClick={onClose} type="button"><X size={20} /><span>Volver</span></button>
-        <div className="dz-counter"><span>{cleared} {game === 'trace' ? 'trazos' : 'disueltas'}</span></div>
         <button className={`dz-sound ${soundOn ? 'active' : ''}`} onClick={toggleSound} type="button">
           {soundOn ? <Volume2 size={18} /> : <VolumeX size={18} />}
         </button>
@@ -238,8 +305,10 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
           const Icon = g.icon;
           return (
             <button key={g.id} className={`dz-game-tab ${game === g.id ? 'active' : ''} ${g.locked ? 'locked' : ''}`}
-              onClick={() => selectGame(g.id)} type="button" disabled={g.locked}>
-              <Icon size={14} /><span>{g.title}</span>
+              onClick={() => selectGame(g.id, g.locked)} type="button">
+              {g.locked ? <Lock size={13} /> : <Icon size={14} />}
+              <span>{g.title}</span>
+              {g.locked && <span className="dz-premium-badge">Premium</span>}
             </button>
           );
         })}
@@ -248,45 +317,54 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
       <div
         className="dz-canvas"
         ref={canvasRef}
-        onPointerMove={game === 'dissolve' ? moveDissolveDrag : game === 'trace' ? addTracePoint : undefined}
-        onPointerUp={game === 'dissolve' ? endDissolveDrag : game === 'trace' ? endTrace : undefined}
-        onPointerCancel={game === 'dissolve' ? endDissolveDrag : game === 'trace' ? endTrace : undefined}
-        onPointerDown={game === 'trace' ? startTrace : undefined}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerDown={handlePointerDown}
       >
         <div className="dz-glow" />
 
-        {game === 'dissolve' && (
+        {game === 'spheres' && (
           <>
-            {particles.filter((p) => !p.dissipated).length === 0 && (
-              <div className="dz-empty"><p>Desliza las partículas para que se desvanezcan.</p></div>
+            {spheres.filter((s) => !s.matched).length === 0 && (
+              <div className="dz-empty"><p>Arrastra desde una esfera hasta su pareja del mismo color.</p></div>
             )}
-            {particles.map((p) => {
-              const color = PARTICLE_COLORS[p.id % PARTICLE_COLORS.length];
-              return (
-                <div key={p.id}
-                  className={`dz-particle ${p.dissipated ? 'dissipated' : ''}`}
-                  style={{
-                    left: `${p.x}%`, top: `${p.y}%`,
-                    width: `${p.size}px`, height: `${p.size}px`,
-                    opacity: p.opacity,
-                    background: `radial-gradient(circle at 32% 28%, ${color}, ${color}88)`,
-                  }}
-                  onPointerDown={(e) => startDissolveDrag(e, p)}
-                  onClick={() => tapParticle(p)}
-                  role="button" tabIndex={0}
-                />
-              );
-            })}
+            {spheres.map((s) => (
+              <div key={s.id}
+                className={`dz-sphere ${s.matched ? 'matched' : ''} ${s.spawning ? 'spawning' : ''}`}
+                style={{
+                  left: `${s.x}%`, top: `${s.y}%`,
+                  width: `${s.size}px`, height: `${s.size}px`,
+                  background: `radial-gradient(circle at 32% 28%, ${s.color}, ${s.color}99)`,
+                  '--drift-x': `${(Math.random() - 0.5) * 20}px`,
+                } as CSSProperties}
+                onPointerDown={(e) => startSphereDrag(e, s)}
+              />
+            ))}
+            {dragFrom && dragPos && (
+              <svg className="dz-trace-svg" preserveAspectRatio="none" viewBox="0 0 100 100">
+                <line x1={dragFrom.x} y1={dragFrom.y} x2={dragPos.x} y2={dragPos.y}
+                  stroke={dragFrom.color} strokeWidth="0.8" strokeLinecap="round" opacity="0.75" />
+              </svg>
+            )}
           </>
         )}
 
         {game === 'raindrop' && (
           <>
-            <div className="dz-empty"><p>Mira la gota caer. Solo observa.</p></div>
-            {drops.map((d) => <div key={d.id} className="dz-raindrop" style={{ top: `${d.y}%` }} />)}
+            {drops.length === 0 && (
+              <div className="dz-empty"><p>Toca o desliza el dedo para limpiar las gotas.</p></div>
+            )}
+            {drops.map((d) => (
+              <div key={d.id}
+                className={`dz-raindrop ${d.popped ? 'popped' : ''}`}
+                style={{ left: `${d.x}%`, top: `${d.y}%`, '--drift-x': `${(Math.random() - 0.5) * 16}px` } as CSSProperties}
+                onPointerDown={(e) => { e.stopPropagation(); if (!d.popped) popDrop(d); }}
+              />
+            ))}
             {ripples.map((r) => (
               <div key={r.id} className="dz-ripple"
-                style={{ left: `${r.x}%`, top: `${r.y}%`, '--ripple-size': `${r.age * 2}px`, '--ripple-opacity': Math.max(0, 1 - r.age / 60) } as React.CSSProperties} />
+                style={{ left: `${r.x}%`, top: `${r.y}%`, '--ripple-size': `${r.age * 2}px`, '--ripple-opacity': Math.max(0, 1 - r.age / 60) } as CSSProperties} />
             ))}
           </>
         )}
@@ -311,8 +389,8 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
       </div>
 
       <p className="dz-hint">
-        {game === 'dissolve' && 'Desliza cada partícula para que se desvanezca. Sin prisa.'}
-        {game === 'raindrop' && 'Solo observa. La gota cae sola, las ondas se expanden solas.'}
+        {game === 'spheres' && 'Conecta cada esfera con su pareja del mismo color. Sin prisa, sin meta.'}
+        {game === 'raindrop' && 'Limpia las gotas a tu ritmo. Las que no toques simplemente siguen su camino.'}
         {game === 'trace' && 'Traza líneas suaves con el dedo. Sin meta, sin destino.'}
       </p>
 
@@ -328,7 +406,6 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
         .dz-bar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; padding-top: max(14px, env(safe-area-inset-top)); gap: 12px; }
         .dz-close { display: flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer; }
         .dz-close:hover { background: var(--muted); color: var(--text); }
-        .dz-counter { font-size: 13px; color: var(--text-soft); font-weight: 500; }
         .dz-sound { width: 40px; height: 40px; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); border-radius: 50%; cursor: pointer; display: grid; place-items: center; }
         .dz-sound.active { color: var(--primary); border-color: var(--primary-200); }
 
@@ -336,17 +413,31 @@ export default function DisconnectionZone({ open, onClose, isPremium }: Props) {
         .dz-game-selector::-webkit-scrollbar { display: none; }
         .dz-game-tab { display: flex; align-items: center; gap: 5px; padding: 8px 14px; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
         .dz-game-tab.active { border-color: var(--primary); color: var(--primary); background: rgba(112,130,56,0.06); }
-        .dz-game-tab.locked { opacity: 0.4; cursor: not-allowed; }
+        .dz-game-tab.locked { color: var(--text-muted); border-style: dashed; }
+        .dz-premium-badge { padding: 2px 7px; border-radius: 999px; background: rgba(196,154,90,0.16); color: var(--warn); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
 
         .dz-canvas { flex: 1; position: relative; overflow: hidden; touch-action: none; }
         .dz-glow { position: absolute; top: 50%; left: 50%; width: 280px; height: 280px; transform: translate(-50%, -50%); background: radial-gradient(circle, rgba(168,184,126,0.12) 0%, transparent 70%); filter: blur(30px); pointer-events: none; }
         .dz-empty { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: var(--text-soft); font-size: 15px; max-width: 260px; pointer-events: none; animation: fadeIn 0.5s ease; }
 
-        .dz-particle { position: absolute; border-radius: 50%; cursor: grab; box-shadow: 0 4px 14px rgba(58,58,54,0.1), inset 0 2px 4px rgba(255,255,255,0.3); transition: opacity 0.3s; will-change: transform, opacity; transform: translate(-50%, -50%); user-select: none; -webkit-user-select: none; touch-action: none; }
-        .dz-particle.dissipated { animation: driftAway 0.8s ease-out forwards; pointer-events: none; }
-        .dz-particle:active { cursor: grabbing; }
+        .dz-sphere {
+          position: absolute; border-radius: 50%; cursor: grab;
+          box-shadow: 0 4px 14px rgba(58,58,54,0.12), inset 0 2px 4px rgba(255,255,255,0.3);
+          transition: opacity 0.35s ease, transform 0.35s ease;
+          transform: translate(-50%, -50%); opacity: 0.92;
+          user-select: none; -webkit-user-select: none; touch-action: none;
+        }
+        .dz-sphere.spawning { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+        .dz-sphere.matched { animation: driftAway 0.65s ease-out forwards; pointer-events: none; }
+        .dz-sphere:active { cursor: grabbing; }
 
-        .dz-raindrop { position: absolute; left: 50%; transform: translateX(-50%); width: 12px; height: 18px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: linear-gradient(180deg, rgba(168,184,126,0.6), rgba(112,130,56,0.8)); filter: blur(0.5px); transition: top 2.3s cubic-bezier(0.4,0,0.2,1); }
+        .dz-raindrop {
+          position: absolute; transform: translate(-50%, -50%);
+          width: 13px; height: 19px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+          background: linear-gradient(180deg, rgba(168,184,126,0.65), rgba(112,130,56,0.85));
+          filter: blur(0.5px); touch-action: none; cursor: pointer;
+        }
+        .dz-raindrop.popped { animation: driftAway 0.5s ease-out forwards; pointer-events: none; }
         .dz-ripple { position: absolute; border-radius: 50%; border: 2px solid rgba(112,130,56,0.4); width: var(--ripple-size); height: var(--ripple-size); opacity: var(--ripple-opacity); transform: translate(-50%, -50%); pointer-events: none; transition: width 0.04s linear, height 0.04s linear, opacity 0.04s linear; }
 
         .dz-trace-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }

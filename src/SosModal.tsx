@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Phone, UserPlus, Trash2, Volume2, VolumeX } from 'lucide-react';
+import { X, Phone, UserPlus, Trash2, Volume2, VolumeX, Vibrate, ArrowLeft } from 'lucide-react';
 import { CRISIS_LINES } from './lib/crisis';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
@@ -8,6 +8,12 @@ interface Props {
   open: boolean;
   onClose: () => void;
 }
+
+// Un latido: lub, pausa corta, dub, descanso largo (~70 lpm). Se repite muchas
+// veces para que la vibración no se corte mientras la persona sostiene el dedo.
+const HEARTBEAT_CYCLE = [90, 100, 120, 700];
+const HEARTBEAT_PATTERN = Array(200).fill(HEARTBEAT_CYCLE).flat();
+const VIBRATION_SUPPORTED = typeof navigator !== 'undefined' && 'vibrate' in navigator;
 
 interface TrustedContact {
   id: string;
@@ -40,6 +46,9 @@ export default function SosModal({ open, onClose }: Props) {
   const noiseGainRef = useRef<GainNode | null>(null);
   const filterRef = useRef<BiquadFilterNode | null>(null);
 
+  const [groundingActive, setGroundingActive] = useState(false);
+  const [vibrating, setVibrating] = useState(false);
+
   useEffect(() => { setCountry(profile?.country ?? ''); }, [profile?.country]);
 
   useEffect(() => {
@@ -61,6 +70,8 @@ export default function SosModal({ open, onClose }: Props) {
       if (timerRef.current) window.clearTimeout(timerRef.current);
       setPhase('inhale'); setCycle(0);
       stopAmbientAudio();
+      setGroundingActive(false);
+      stopGroundingVibration();
       return;
     }
     function next() {
@@ -148,7 +159,21 @@ export default function SosModal({ open, onClose }: Props) {
     else { startAmbientAudio(); setAudioOn(true); }
   }
 
-  useEffect(() => () => stopAmbientAudio(), []);
+  function startGroundingVibration() {
+    setVibrating(true);
+    if (VIBRATION_SUPPORTED) {
+      try { navigator.vibrate(HEARTBEAT_PATTERN); } catch { /* ignore */ }
+    }
+  }
+
+  function stopGroundingVibration() {
+    setVibrating(false);
+    if (VIBRATION_SUPPORTED) {
+      try { navigator.vibrate(0); } catch { /* ignore */ }
+    }
+  }
+
+  useEffect(() => () => { stopAmbientAudio(); stopGroundingVibration(); }, []);
 
   if (!open) return null;
   const countryInfo = country ? CRISIS_LINES[country] : null;
@@ -159,6 +184,35 @@ export default function SosModal({ open, onClose }: Props) {
       <div className="sos-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <button className="sos-close" onClick={onClose} aria-label="Cerrar" type="button"><X size={20} /></button>
 
+        {groundingActive ? (
+          <div className="ground-view">
+            <button
+              className="ground-back"
+              onClick={() => { stopGroundingVibration(); setGroundingActive(false); }}
+              type="button"
+            >
+              <ArrowLeft size={16} strokeWidth={2} /><span>Volver</span>
+            </button>
+            <div
+              className={`ground-zone ${vibrating ? 'active' : ''}`}
+              onPointerDown={(e) => { e.preventDefault(); startGroundingVibration(); }}
+              onPointerUp={stopGroundingVibration}
+              onPointerCancel={stopGroundingVibration}
+              onPointerLeave={stopGroundingVibration}
+            >
+              <div className="ground-pulse" />
+              <p className="ground-instruction">
+                {vibrating ? 'Sigue así… respira con el ritmo' : 'Mantén tus dedos aquí'}
+              </p>
+              {!VIBRATION_SUPPORTED && (
+                <p className="ground-fallback-note">
+                  Tu dispositivo no soporta vibración: usa el pulso visual como guía para tu respiración.
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+        <>
         <div className="breath-zone">
           <div className="breath-aura" />
           <div
@@ -172,6 +226,9 @@ export default function SosModal({ open, onClose }: Props) {
           <button className={`audio-toggle ${audioOn ? 'active' : ''}`} onClick={toggleAudio} type="button">
             {audioOn ? <Volume2 size={16} strokeWidth={2} /> : <VolumeX size={16} strokeWidth={2} />}
             <span>{audioOn ? 'Sonido activado' : 'Activar lluvia suave'}</span>
+          </button>
+          <button className="grounding-entry-btn" onClick={() => setGroundingActive(true)} type="button">
+            <Vibrate size={15} strokeWidth={2} /><span>Anclaje por vibración</span>
           </button>
         </div>
 
@@ -237,6 +294,8 @@ export default function SosModal({ open, onClose }: Props) {
           </div>
         )}
         <p className="sos-disclaimer">Si tu vida corre peligro, contacta inmediatamente a los servicios de emergencia locales.</p>
+        </>
+        )}
       </div>
 
       <style>{`
@@ -295,6 +354,47 @@ export default function SosModal({ open, onClose }: Props) {
         }
         .audio-toggle:hover { background: var(--muted); color: var(--text); }
         .audio-toggle.active { background: rgba(112,130,56,0.1); border-color: var(--primary); color: var(--primary-600); }
+
+        .grounding-entry-btn {
+          display: flex; align-items: center; gap: 6px; padding: 8px 16px;
+          border: 1px solid var(--secondary-200); background: transparent;
+          color: var(--secondary); border-radius: 999px;
+          font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+        }
+        .grounding-entry-btn:hover { background: rgba(140,138,126,0.08); }
+
+        .ground-view { display: flex; flex-direction: column; min-height: 420px; padding: 16px 20px 20px; }
+        .ground-back {
+          display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+          padding: 8px 14px; border: 1px solid var(--border); background: var(--surface);
+          color: var(--text-soft); border-radius: 999px; font-size: 13px; font-weight: 600;
+          cursor: pointer; margin-bottom: 8px;
+        }
+        .ground-back:hover { background: var(--muted); color: var(--text); }
+        .ground-zone {
+          position: relative; flex: 1; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; gap: 22px;
+          border-radius: 24px; border: 2px dashed var(--border); background: var(--surface-2);
+          cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: none;
+          transition: border-color 0.2s, background 0.2s; text-align: center; padding: 32px 20px;
+        }
+        .ground-zone.active { border-color: var(--secondary); border-style: solid; background: rgba(140,138,126,0.08); }
+        .ground-pulse {
+          width: 96px; height: 96px; border-radius: 50%;
+          background: radial-gradient(circle, var(--secondary-200), var(--secondary));
+          box-shadow: 0 4px 24px rgba(140,138,126,0.3);
+          animation: heartbeatPulse 0.86s ease-in-out infinite;
+        }
+        .ground-zone.active .ground-pulse { box-shadow: 0 4px 32px rgba(140,138,126,0.5); }
+        @keyframes heartbeatPulse {
+          0%, 100% { transform: scale(0.85); }
+          15% { transform: scale(1.08); }
+          30% { transform: scale(0.92); }
+          45% { transform: scale(1.15); }
+          60% { transform: scale(0.85); }
+        }
+        .ground-instruction { font-size: 16px; font-weight: 600; color: var(--text); margin: 0; }
+        .ground-fallback-note { font-size: 12.5px; color: var(--text-soft); margin: 0; max-width: 260px; line-height: 1.5; }
 
         .sos-divider { display: flex; align-items: center; gap: 12px; padding: 16px 22px 0; color: var(--text-muted); font-size: 12px; font-weight: 500; }
         .sos-divider::before, .sos-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-soft); }

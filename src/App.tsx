@@ -1,23 +1,23 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from './lib/auth';
+import { getSessionToken } from './lib/session';
 import AuthPage from './AuthPage';
 import PatientDashboard from './PatientDashboard';
 import TherapistDashboard from './TherapistDashboard';
 import WelcomeScreen from './WelcomeScreen';
-import SosModal from './SosModal';
-import DisconnectionZone from './DisconnectionZone';
 
 type Phase = 'entry' | 'auth' | 'app';
 
 export default function App() {
-  const { session, profile, loading } = useAuth();
-  const [phase, setPhase] = useState<Phase>('entry');
-  const [sosOpen, setSosOpen] = useState(false);
-  const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const { profile, loading } = useAuth();
+  // Si ya hay un token de sesión guardado, arrancamos directo en 'app' para
+  // no mostrar ni la bienvenida ni el login mientras se resuelve la sesión
+  // en segundo plano (la pantalla de carga cubre esa espera).
+  const [phase, setPhase] = useState<Phase>(() => (getSessionToken() ? 'app' : 'entry'));
 
   useEffect(() => {
-    if (session && profile) setPhase('app');
-  }, [session, profile]);
+    if (profile) setPhase('app');
+  }, [profile]);
 
   if (loading) {
     return (
@@ -33,23 +33,14 @@ export default function App() {
   }
 
   if (phase === 'entry') {
-    return <WelcomeScreen onEnter={() => setPhase(session && profile ? 'app' : 'auth')} />;
+    return <WelcomeScreen onEnter={() => setPhase(profile ? 'app' : 'auth')} />;
   }
 
-  if (phase === 'auth' || !session || !profile) {
+  if (phase === 'auth' || !profile) {
     return <AuthPage />;
   }
 
   if (profile.role === 'psychologist') return <TherapistDashboard />;
 
-  return (
-    <>
-      <PatientDashboard
-        onSos={() => setSosOpen(true)}
-        onDisconnect={() => setDisconnectOpen(true)}
-      />
-      <SosModal open={sosOpen} onClose={() => setSosOpen(false)} />
-      <DisconnectionZone open={disconnectOpen} onClose={() => setDisconnectOpen(false)} isPremium={false} />
-    </>
-  );
+  return <PatientDashboard onExitToHome={() => setPhase('entry')} />;
 }

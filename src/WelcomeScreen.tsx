@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { Heart } from 'lucide-react';
+import { useState, type CSSProperties } from 'react';
 
 interface Props {
   onEnter: () => void;
@@ -16,18 +15,19 @@ export default function WelcomeScreen({ onEnter }: Props) {
   return (
     <div className={`entry-screen ${leaving ? 'leaving' : ''}`}>
       <div className="entry-aura" />
+      <div className="entry-aura entry-aura-2" />
       <div className="entry-stars">
         {STARS.map((s, i) => (
           <span key={i} className="entry-star" style={s} />
+        ))}
+        {PARTICLES.map((p, i) => (
+          <span key={`p${i}`} className="entry-particle" style={p} />
         ))}
       </div>
 
       <div className="entry-content">
         <div className="entry-brand anim-fade-slow">
-          <div className="entry-logo">
-            <Heart size={24} strokeWidth={1.5} />
-          </div>
-          <span className="entry-name">Calivia</span>
+          <img src="/logo-calivia.png" alt="Calivia" className="entry-logo-img" />
         </div>
 
         <p className="entry-tagline anim-slide" style={{ animationDelay: '0.4s' }}>
@@ -70,12 +70,29 @@ export default function WelcomeScreen({ onEnter }: Props) {
           filter: blur(40px); pointer-events: none;
           animation: breathe 8s ease-in-out infinite;
         }
+        .entry-aura-2 {
+          top: 70%; left: 30%; width: 260px; height: 260px;
+          background: radial-gradient(circle, rgba(112,130,56,0.10) 0%, transparent 60%);
+          animation: breathe 11s ease-in-out infinite reverse;
+        }
 
-        .entry-stars { position: absolute; inset: 0; pointer-events: none; }
+        .entry-stars { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
         .entry-star {
           position: absolute; width: 3px; height: 3px;
           border-radius: 50%; background: rgba(168,184,126,0.4);
           animation: float 6s ease-in-out infinite;
+        }
+        .entry-particle {
+          position: absolute; border-radius: 50%;
+          background: radial-gradient(circle at 35% 30%, rgba(168,184,126,0.55), rgba(168,184,126,0.05) 70%);
+          animation-name: drift;
+          animation-timing-function: ease-in-out;
+          animation-iteration-count: infinite;
+        }
+        @keyframes drift {
+          0% { transform: translate(0, 0); opacity: 0.15; }
+          50% { transform: translate(var(--dx, 18px), var(--dy, -26px)); opacity: 0.55; }
+          100% { transform: translate(0, 0); opacity: 0.15; }
         }
 
         .entry-content {
@@ -85,18 +102,8 @@ export default function WelcomeScreen({ onEnter }: Props) {
           max-width: 360px; width: 100%;
         }
 
-        .entry-brand { display: flex; align-items: center; gap: 10px; }
-        .entry-logo {
-          width: 44px; height: 44px; border-radius: 14px;
-          background: rgba(168,184,126,0.15);
-          color: var(--dark-accent);
-          display: grid; place-items: center;
-          border: 1px solid rgba(168,184,126,0.2);
-        }
-        .entry-name {
-          font-size: 22px; font-weight: 700;
-          letter-spacing: -0.02em; color: var(--dark-text);
-        }
+        .entry-brand { display: flex; align-items: center; justify-content: center; }
+        .entry-logo-img { height: 56px; width: auto; object-fit: contain; }
 
         .entry-tagline {
           margin: 0; font-size: 17px; line-height: 1.5;
@@ -135,6 +142,21 @@ export default function WelcomeScreen({ onEnter }: Props) {
     </div>
   );
 }
+
+const PARTICLES = Array.from({ length: 16 }, (_, i) => {
+  const size = 4 + Math.random() * 10;
+  const duration = 9 + Math.random() * 10;
+  return {
+    left: `${Math.random() * 100}%`,
+    top: `${Math.random() * 100}%`,
+    width: `${size}px`,
+    height: `${size}px`,
+    animationDuration: `${duration}s`,
+    animationDelay: `${(i * 0.6) % duration}s`,
+    '--dx': `${(Math.random() - 0.5) * 60}px`,
+    '--dy': `${-20 - Math.random() * 40}px`,
+  } as CSSProperties;
+});
 
 const STARS = [
   { left: '15%', top: '20%', animationDelay: '0s', animationDuration: '5s' },

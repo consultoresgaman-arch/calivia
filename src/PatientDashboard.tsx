@@ -1,22 +1,24 @@
 import { useEffect, useState } from 'react';
-import { MessageCircle, Wind, Gamepad2, LogOut, Heart } from 'lucide-react';
+import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, CalendarClock } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useAuth } from './lib/auth';
 import AiChat from './AiChat';
 import FreemiumBanner from './FreemiumBanner';
 import SosModal from './SosModal';
 import DisconnectionZone from './DisconnectionZone';
+import WeeklyProgress from './WeeklyProgress';
+import TaskManager from './TaskManager';
 
 const MAX_FREE_MESSAGES = 20;
+const CALENDLY_URL = 'https://calendly.com/consultoresgaman/30min';
 
-type Section = 'chat' | 'breathe' | 'games';
+type Section = 'chat' | 'breathe' | 'games' | 'progress' | 'tasks';
 
 interface Props {
-  onSos?: () => void;
-  onDisconnect?: () => void;
+  onExitToHome?: () => void;
 }
 
-export default function PatientDashboard(_props: Props) {
+export default function PatientDashboard({ onExitToHome }: Props) {
   const { profile, signOut } = useAuth();
   const [section, setSection] = useState<Section>('chat');
   const [messagesSent, setMessagesSent] = useState(0);
@@ -24,6 +26,8 @@ export default function PatientDashboard(_props: Props) {
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const today = new Date().toISOString().slice(0, 10);
+  const isPremium = !!profile?.is_premium;
+  const maxFree = isPremium ? Infinity : MAX_FREE_MESSAGES;
 
   useEffect(() => {
     let mounted = true;
@@ -45,17 +49,32 @@ export default function PatientDashboard(_props: Props) {
       <header className="app-header">
         <div className="header-inner">
           <div className="brand">
-            <div className="brand-mark"><Heart size={18} strokeWidth={2} /></div>
-            <span className="brand-name">Calivia</span>
+            <img src="/logo-calivia.png" alt="Calivia" className="brand-logo-img" />
           </div>
           <div className="header-actions">
+            {onExitToHome && (
+              <button className="hdr-btn" onClick={onExitToHome} type="button" aria-label="Volver al inicio" title="Volver al inicio">
+                <Home size={16} strokeWidth={2} />
+                <span className="hdr-btn-label">Inicio</span>
+              </button>
+            )}
+            <a
+              className="hdr-btn hdr-btn-calendly"
+              href={CALENDLY_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Agendar consulta con un especialista"
+              title="Agendar consulta"
+            >
+              <CalendarClock size={16} strokeWidth={2} />
+              <span className="hdr-btn-label">Agendar</span>
+            </a>
             <div className="user-chip" onClick={() => setMenuOpen((o) => !o)}>
-              <div className="user-avatar">{(profile?.full_name || profile?.email || '?').charAt(0).toUpperCase()}</div>
+              <div className="user-avatar">{(profile?.full_name || '?').charAt(0).toUpperCase()}</div>
               {menuOpen && (
                 <div className="user-menu anim-pop" onClick={(e) => e.stopPropagation()}>
                   <div className="user-menu-info">
                     <div className="user-menu-name">{profile?.full_name || 'Usuario'}</div>
-                    <div className="user-menu-email">{profile?.email}</div>
                   </div>
                   <button className="user-menu-logout" onClick={signOut} type="button">
                     <LogOut size={16} strokeWidth={2} /><span>Salir</span>
@@ -68,7 +87,14 @@ export default function PatientDashboard(_props: Props) {
       </header>
 
       <main className="refugio">
-        {section === 'chat' && <FreemiumBanner messagesToday={messagesSent} maxFree={MAX_FREE_MESSAGES} />}
+        {section === 'chat' && !isPremium && (
+          <FreemiumBanner
+            messagesToday={messagesSent}
+            maxFree={MAX_FREE_MESSAGES}
+            userId={profile!.id}
+            name={profile?.full_name}
+          />
+        )}
 
         <div className="section-tabs">
           <button className={`stab ${section === 'chat' ? 'active' : ''}`} onClick={() => setSection('chat')} type="button">
@@ -80,11 +106,23 @@ export default function PatientDashboard(_props: Props) {
           <button className={`stab ${section === 'games' ? 'active' : ''}`} onClick={() => setSection('games')} type="button">
             <Gamepad2 size={16} strokeWidth={2} /><span>Desconectar</span>
           </button>
+          <button className={`stab ${section === 'progress' ? 'active' : ''}`} onClick={() => setSection('progress')} type="button">
+            <TrendingUp size={16} strokeWidth={2} /><span>Progreso</span>
+          </button>
+          <button className={`stab ${section === 'tasks' ? 'active' : ''}`} onClick={() => setSection('tasks')} type="button">
+            <CheckSquare size={16} strokeWidth={2} /><span>Tareas</span>
+          </button>
         </div>
 
         {section === 'chat' && (
           <div className="chat-section anim-fade">
-            <AiChat userId={profile!.id} messagesSent={messagesSent} maxFree={MAX_FREE_MESSAGES} onMessageSent={() => setMessagesSent((n) => n + 1)} />
+            <AiChat
+              userId={profile!.id}
+              name={profile?.full_name}
+              messagesSent={messagesSent}
+              maxFree={maxFree}
+              onMessageSent={() => setMessagesSent((n) => n + 1)}
+            />
           </div>
         )}
 
@@ -108,6 +146,18 @@ export default function PatientDashboard(_props: Props) {
             </div>
           </div>
         )}
+
+        {section === 'progress' && (
+          <div className="progress-section anim-fade">
+            <WeeklyProgress userId={profile!.id} />
+          </div>
+        )}
+
+        {section === 'tasks' && (
+          <div className="progress-section anim-fade">
+            <TaskManager userId={profile!.id} />
+          </div>
+        )}
       </main>
 
       <div className="sos-dock">
@@ -117,15 +167,31 @@ export default function PatientDashboard(_props: Props) {
       </div>
 
       <SosModal open={sosOpen} onClose={() => setSosOpen(false)} />
-      <DisconnectionZone open={disconnectOpen} onClose={() => setDisconnectOpen(false)} isPremium={false} />
+      <DisconnectionZone
+        open={disconnectOpen}
+        onClose={() => setDisconnectOpen(false)}
+        isPremium={isPremium}
+        userId={profile!.id}
+        name={profile?.full_name}
+      />
 
       <style>{`
         .app-header { position: sticky; top: 0; z-index: 40; background: rgba(245,243,238,0.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-soft); }
         .header-inner { max-width: 560px; margin: 0 auto; padding: 12px 20px; padding-top: max(12px, env(safe-area-inset-top)); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
         .brand { display: flex; align-items: center; gap: 8px; }
-        .brand-mark { width: 34px; height: 34px; border-radius: 12px; background: linear-gradient(135deg, var(--primary-200), var(--primary)); color: #fff; display: grid; place-items: center; }
-        .brand-name { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
-        .header-actions { display: flex; align-items: center; gap: 8px; }
+        .brand-logo-img { height: 30px; width: auto; display: block; }
+        .header-actions { display: flex; align-items: center; gap: 6px; }
+        .hdr-btn {
+          display: flex; align-items: center; gap: 6px; padding: 8px 12px;
+          border: 1px solid var(--border); background: var(--surface);
+          color: var(--text-soft); border-radius: 999px;
+          font-size: 13px; font-weight: 600; cursor: pointer;
+          text-decoration: none; transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        .hdr-btn:hover { background: var(--muted); color: var(--text); border-color: var(--primary-200); }
+        .hdr-btn-calendly:hover { color: var(--primary-600); border-color: var(--primary-200); }
+        .hdr-btn-label { display: none; }
+        @media (min-width: 420px) { .hdr-btn-label { display: inline; } }
         .user-chip { position: relative; cursor: pointer; }
         .user-avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--secondary-200), var(--secondary)); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px; }
         .user-menu { position: absolute; top: 40px; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 14px; min-width: 200px; z-index: 50; }
@@ -137,8 +203,9 @@ export default function PatientDashboard(_props: Props) {
 
         .refugio { max-width: 560px; margin: 0 auto; padding: 16px 20px 100px; display: flex; flex-direction: column; gap: 16px; min-height: calc(100vh - 60px); }
 
-        .section-tabs { display: flex; gap: 6px; background: var(--surface-2); padding: 5px; border-radius: 14px; border: 1px solid var(--border-soft); }
-        .stab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; border: none; background: transparent; color: var(--text-soft); font-size: 13px; font-weight: 600; border-radius: 10px; cursor: pointer; transition: all 0.15s; }
+        .section-tabs { display: flex; gap: 6px; background: var(--surface-2); padding: 5px; border-radius: 14px; border: 1px solid var(--border-soft); overflow-x: auto; scrollbar-width: none; }
+        .section-tabs::-webkit-scrollbar { display: none; }
+        .stab { flex: 1 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 12px; border: none; background: transparent; color: var(--text-soft); font-size: 13px; font-weight: 600; border-radius: 10px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
         .stab.active { background: var(--surface); color: var(--primary-600); box-shadow: 0 2px 6px rgba(58,58,54,0.06); }
 
         .chat-section { flex: 1; display: flex; flex-direction: column; min-height: 420px; }
@@ -158,6 +225,8 @@ export default function PatientDashboard(_props: Props) {
         .games-icon { width: 64px; height: 64px; border-radius: 20px; background: rgba(112,130,56,0.1); color: var(--primary); display: grid; place-items: center; }
         .games-card h2 { margin: 0; font-size: 18px; font-weight: 700; }
         .games-card p { margin: 0; font-size: 14px; color: var(--text-soft); }
+
+        .progress-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; }
 
         .sos-dock { position: fixed; bottom: 0; left: 0; right: 0; padding: 12px 20px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, var(--bg) 30%); z-index: 30; display: flex; justify-content: center; }
         .sos-fab { display: flex; align-items: center; gap: 8px; padding: 14px 28px; border: none; border-radius: 999px; background: var(--secondary); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 20px rgba(140,138,126,0.25); transition: transform 0.12s; max-width: 320px; width: 100%; justify-content: center; }
