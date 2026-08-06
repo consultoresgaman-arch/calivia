@@ -1,8 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import { Mic, Send, Heart, Zap, Volume2 } from 'lucide-react';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { supabase } from './lib/supabase';
 import type { ChatLog } from './lib/types';
 import { isCheckoutConfigured, openCheckout } from './lib/payments';
+
+interface MicPermissionPlugin {
+  requestMicPermission(): Promise<{ granted: boolean }>;
+}
+
+const MicPermission = registerPlugin<MicPermissionPlugin>('MicPermission');
+
+function voiceQualityScore(v: SpeechSynthesisVoice): number {
+  const n = `${v.name} ${v.voiceURI}`.toLowerCase();
+  let score = 0;
+  if (n.includes('google')) score += 4;
+  if (n.includes('neural') || n.includes('natural')) score += 4;
+  if (n.includes('network') || n.includes('online') || n.includes('cloud') || n.includes('plus')) score += 2;
+  if (v.localService === false) score += 1;
+  if (n.includes('compact') || n.includes('robot') || n.includes('espeak')) score -= 5;
+  return score;
+}
 
 const SYSTEM_NOTE = 'Soy Calivia (la unión de calma y alivio). Un espacio de acompañamiento, no sustituyo la atención profesional.';
 
@@ -158,11 +176,15 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       if (allVoices.length === 0) return;
 
       const spanishVoices = allVoices.filter((v) => v.lang.toLowerCase().includes('es'));
-      const usable = spanishVoices.length > 0 ? spanishVoices : allVoices;
+      const pool = spanishVoices.length > 0 ? spanishVoices : allVoices;
+      const highQuality = pool.filter((v) => voiceQualityScore(v) > 0);
+      const usable = (highQuality.length > 0 ? highQuality : pool)
+        .slice()
+        .sort((a, b) => voiceQualityScore(b) - voiceQualityScore(a));
       setVoices(usable);
       if (!hasSelectedVoiceRef.current) {
         hasSelectedVoiceRef.current = true;
-        const preferred = spanishVoices.find((v) => v.lang.toLowerCase().includes('co') || v.lang.toLowerCase().includes('419')) || usable[0];
+        const preferred = usable.find((v) => v.lang.toLowerCase().includes('co') || v.lang.toLowerCase().includes('419')) || usable[0];
         setSelectedVoiceUri(preferred.voiceURI);
       }
       settled = true;
@@ -237,13 +259,22 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     setRecording(false);
   }
 
-  // En Android (WebView de Capacitor) el navegador no pide el permiso de
-  // micrófono solo con arrancar el reconocimiento de voz — hay que
-  // solicitarlo explícitamente primero vía getUserMedia (con el permiso
-  // RECORD_AUDIO ya declarado en el manifest, esto sí dispara el diálogo
-  // nativo de Android la primera vez). En navegadores normales esto es
-  // inofensivo y a veces incluso evita el prompt duplicado de SpeechRecognition.
+  // En Android, el WebView solo concede getUserMedia si la app ya tiene el
+  // permiso RECORD_AUDIO otorgado a nivel de sistema — si nunca se lo hemos
+  // pedido de forma nativa, el WebView lo deniega en silencio. Por eso primero
+  // pasamos por el plugin nativo (MicPermissionPlugin, ver MainActivity.java),
+  // que dispara el diálogo real de Android, y solo después llamamos a
+  // getUserMedia (que en navegadores normales es la única vía y es inofensivo).
   async function ensureMicPermission(): Promise<boolean> {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { granted } = await MicPermission.requestMicPermission();
+        if (!granted) return false;
+      } catch {
+        // Si el plugin nativo no está disponible por algún motivo, seguimos
+        // con el flujo web como respaldo en vez de bloquear el dictado.
+      }
+    }
     if (!navigator.mediaDevices?.getUserMedia) return true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });

@@ -57,11 +57,22 @@ const SPHERE_COLORS = ['#A8B87E', '#8FAF6B', '#C9A66B', '#B08BC0', '#6FA8B8'];
 const PAIR_COUNT = 4;
 const MAX_DROPS = 9;
 
-// "Estrellita dónde estás" / Twinkle Twinkle Little Star — melodía tradicional
-// de dominio público, sencilla y ampliamente reconocible en tono relajante.
-const MELODY = [
-  261.63, 261.63, 392.0, 392.0, 440.0, 440.0, 392.0,
-  349.23, 349.23, 329.63, 329.63, 293.66, 293.66, 261.63,
+// Notas (A4=440Hz) usadas para armar las melodías tradicionales de dominio
+// público del repertorio — sencillas, lentas y ampliamente reconocibles.
+const C4 = 261.63, D4 = 293.66, E4 = 329.63, F4 = 349.23, G4 = 392.0, A4 = 440.0, B4 = 493.88;
+const C5 = 523.25, D5 = 587.33, DS5 = 622.25, E5 = 659.25;
+
+const MELODIES: number[][] = [
+  // Estrellita dónde estás / Twinkle Twinkle Little Star
+  [C4, C4, G4, G4, A4, A4, G4, F4, F4, E4, E4, D4, D4, C4],
+  // Fray Santiago / Frère Jacques
+  [C4, D4, E4, C4, C4, D4, E4, C4, E4, F4, G4, E4, F4, G4],
+  // Himno a la Alegría (Oda a la Alegría, Beethoven)
+  [E4, E4, F4, G4, G4, F4, E4, D4, C4, C4, D4, E4, E4, D4, D4],
+  // Für Elise (Beethoven) — motivo de apertura
+  [E5, DS5, E5, DS5, E5, B4, D5, C5, A4, C4, E4, A4, B4, E4],
+  // Arroz con leche (canción de cuna tradicional)
+  [G4, G4, G4, E4, F4, G4, A4, G4, F4, E4, D4, C4, D4, C4],
 ];
 
 const PARTICLE_HUES = [82, 96, 40, 270, 195];
@@ -79,6 +90,7 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
   const [melodyDone, setMelodyDone] = useState(false);
   const spawnedInRoundRef = useRef(0);
   const resolvedInRoundRef = useRef(0);
+  const melodyIndexRef = useRef(0);
 
   const [ripples, setRipples] = useState<Ripple[]>([]);
   const [tracePoints, setTracePoints] = useState<TracePoint[]>([]);
@@ -116,6 +128,25 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
     } catch { /* ignore */ }
   }
 
+  function playChord(freqs: number[]) {
+    if (!soundOn) return;
+    try {
+      const ctx = ensureAudio();
+      const now = ctx.currentTime;
+      freqs.forEach((freq) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.035, now + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.start(now); osc.stop(now + 1.8);
+      });
+    } catch { /* ignore */ }
+  }
+
   function makeSphere(color: string): Sphere {
     return {
       id: nextSphereId.current++,
@@ -147,8 +178,18 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
   }, [open, game]);
 
   // Raindrop game ("Lluvia de Melodías"): cada gota lleva una nota secuencial
-  // de la melodía. Se resuelve (suene o no) al tocarla o al caer sin tocar.
-  function startMelodyRound() {
+  // de la melodía activa. Se resuelve (suene o no) al tocarla o al caer sin
+  // tocar. Al terminar una melodía, suena un acorde suave y empieza otra
+  // distinta del repertorio.
+  function pickNextMelodyIndex(excludeIndex: number) {
+    if (MELODIES.length <= 1) return 0;
+    let idx = excludeIndex;
+    while (idx === excludeIndex) idx = Math.floor(Math.random() * MELODIES.length);
+    return idx;
+  }
+
+  function startMelodyRound(pickNew: boolean) {
+    if (pickNew) melodyIndexRef.current = pickNextMelodyIndex(melodyIndexRef.current);
     spawnedInRoundRef.current = 0;
     resolvedInRoundRef.current = 0;
     setMelodyDone(false);
@@ -156,21 +197,25 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
 
   function resolveNote() {
     resolvedInRoundRef.current++;
-    if (resolvedInRoundRef.current >= MELODY.length) {
+    const seq = MELODIES[melodyIndexRef.current];
+    if (resolvedInRoundRef.current >= seq.length) {
       setMelodyDone(true);
-      setTimeout(startMelodyRound, 4500);
+      playChord([C4, E4, G4]);
+      setTimeout(() => startMelodyRound(true), 4500);
     }
   }
 
   useEffect(() => {
     if (!open || game !== 'raindrop') return;
     setDrops([]); setRipples([]);
-    startMelodyRound();
+    melodyIndexRef.current = Math.floor(Math.random() * MELODIES.length);
+    startMelodyRound(false);
     function spawn() {
       setDrops((prev) => {
         const active = prev.filter((d) => !d.popped);
         if (active.length >= MAX_DROPS) return prev;
-        if (spawnedInRoundRef.current >= MELODY.length) return prev;
+        const seq = MELODIES[melodyIndexRef.current];
+        if (spawnedInRoundRef.current >= seq.length) return prev;
         const noteIndex = spawnedInRoundRef.current;
         spawnedInRoundRef.current++;
         return [...prev, {
@@ -288,7 +333,7 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
   function popDrop(d: Drop) {
     setDrops((prev) => prev.map((x) => (x.id === d.id ? { ...x, popped: true } : x)));
     setRipples((r) => [...r, { id: nextRippleId.current++, x: d.x, y: d.y, age: 0 }]);
-    playChime(MELODY[d.noteIndex]);
+    playChime(MELODIES[melodyIndexRef.current][d.noteIndex]);
     resolveNote();
     setTimeout(() => setDrops((prev) => prev.filter((x) => x.id !== d.id)), 500);
   }
@@ -447,7 +492,7 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
             {melodyDone && (
               <div className="dz-melody-msg anim-pop">
                 <p>🎵 Has despejado la melodía por completo.</p>
-                <p className="dz-melody-msg-sub">¿La reconoces?</p>
+                <p className="dz-melody-msg-sub">¿La reconoces? En un momento suena otra.</p>
               </div>
             )}
           </>
