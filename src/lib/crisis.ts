@@ -62,6 +62,94 @@ export const CRISIS_LINES: Record<string, { label: string; lines: CrisisLine[] }
       { name: 'Emergencias', phone: '911', hours: '24/7' },
     ],
   },
+  EC: {
+    label: 'Ecuador',
+    lines: [
+      { name: 'ECU 911 (Emergencias)', phone: '911', hours: '24/7' },
+      { name: 'Salud Mental (Ministerio de Salud Pública)', phone: '171', hours: '24/7', notes: 'Verifica el número vigente en tu localidad' },
+    ],
+  },
+  VE: {
+    label: 'Venezuela',
+    lines: [
+      { name: 'Emergencias', phone: '911', hours: '24/7', notes: 'Verifica el número vigente en tu localidad' },
+    ],
+  },
+  BO: {
+    label: 'Bolivia',
+    lines: [
+      { name: 'Emergencias', phone: '911', hours: '24/7', notes: 'Verifica el número vigente en tu localidad' },
+    ],
+  },
+  PY: {
+    label: 'Paraguay',
+    lines: [
+      { name: 'Emergencias', phone: '911', hours: '24/7', notes: 'Verifica el número vigente en tu localidad' },
+    ],
+  },
+  UY: {
+    label: 'Uruguay',
+    lines: [
+      { name: 'Emergencias', phone: '911', hours: '24/7' },
+    ],
+  },
+  GT: {
+    label: 'Guatemala',
+    lines: [
+      { name: 'Policía Nacional Civil', phone: '110', hours: '24/7' },
+      { name: 'Bomberos Voluntarios', phone: '122', hours: '24/7' },
+    ],
+  },
+  HN: {
+    label: 'Honduras',
+    lines: [
+      { name: 'Emergencias', phone: '911', hours: '24/7' },
+    ],
+  },
+  SV: {
+    label: 'El Salvador',
+    lines: [
+      { name: 'Emergencias', phone: '911', hours: '24/7' },
+    ],
+  },
+  NI: {
+    label: 'Nicaragua',
+    lines: [
+      { name: 'Emergencias', phone: '911', hours: '24/7' },
+    ],
+  },
+  CR: {
+    label: 'Costa Rica',
+    lines: [
+      { name: 'Emergencias', phone: '911', hours: '24/7' },
+    ],
+  },
+  PA: {
+    label: 'Panamá',
+    lines: [
+      { name: 'Sistema Único de Emergencias', phone: '911', hours: '24/7' },
+    ],
+  },
+  DO: {
+    label: 'República Dominicana',
+    lines: [
+      { name: 'Sistema 9-1-1', phone: '911', hours: '24/7' },
+    ],
+  },
+  CU: {
+    label: 'Cuba',
+    lines: [
+      { name: 'Emergencias', phone: '106', hours: '24/7', notes: 'Verifica el número vigente en tu localidad' },
+    ],
+  },
+  BR: {
+    label: 'Brasil',
+    lines: [
+      { name: 'CVV — Centro de Valorização da Vida', phone: '188', hours: '24/7' },
+      { name: 'SAMU (Emergência médica)', phone: '192', hours: '24/7' },
+      { name: 'Polícia', phone: '190', hours: '24/7' },
+    ],
+  },
 };
 
 export const COUNTRY_OPTIONS = Object.entries(CRISIS_LINES).map(([code, v]) => ({

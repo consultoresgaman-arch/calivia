@@ -588,15 +588,6 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         )}
       </div>
 
-      {messages.length > 0 && !limitReached && (
-        <div className="quick-prompts quick-prompts-slim">
-          {QUICK_PROMPTS.map((q) => (
-            <button key={q} type="button" className="quick-chip" onClick={() => send(null, q, false)}>
-              {q}
-            </button>
-          ))}
-        </div>
-      )}
 
       {usingFallback && !sending && (
         <div className="chat-fallback-note">
@@ -690,7 +681,6 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         .chat-welcome-sub { font-size: 13px !important; color: var(--text-soft) !important; font-weight: 400 !important; }
 
         .quick-prompts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
-        .quick-prompts-slim { justify-content: flex-start; padding: 10px 2px 0; margin-top: 0; }
         .quick-chip {
           padding: 8px 14px; border: 1px solid var(--border); border-radius: 999px;
           background: var(--surface-2); color: var(--text-soft);
