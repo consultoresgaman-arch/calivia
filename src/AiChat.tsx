@@ -24,10 +24,7 @@ function voiceQualityScore(v: SpeechSynthesisVoice): number {
 
 const SYSTEM_NOTE = 'Soy Calivia (la unión de calma y alivio). Un espacio de acompañamiento, no sustituyo la atención profesional.';
 
-// Dictado por voz desactivado temporalmente: en algunos dispositivos el
-// motor nativo de reconocimiento se quedaba "escuchando" sin responder. El
-// chat de texto y la voz hablada de las respuestas (TTS) siguen intactos.
-const VOICE_INPUT_ENABLED = false;
+const VOICE_INPUT_ENABLED = true;
 
 const QUICK_PROMPTS = [
   'No sé por dónde empezar',
@@ -328,7 +325,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       }
 
       const recognition = new SR();
-      recognition.lang = 'es-CO';
+      recognition.lang = 'es-ES';
       recognition.continuous = false;
       recognition.interimResults = true;
 
@@ -384,11 +381,8 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         window.clearTimeout(watchdog);
         setRecording(false);
         recognitionRef.current = null;
-        const textToSend = finalTranscript.trim();
-        if (textToSend) {
-          setInput('');
-          send(null, textToSend, true);
-        }
+        // Deja el texto transcrito en el input para que la persona lo revise
+        // y lo edite si quiere — el envío queda en sus manos, con un toque.
       };
 
       recognitionRef.current = recognition;
