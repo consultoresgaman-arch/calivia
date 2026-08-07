@@ -85,7 +85,37 @@ const CLOSURE_REPLIES = [
   'Llegaste ahí por ti mismo, que es como debe ser. Sigue ese instinto, no te traiciones.',
 ];
 
+// Mismo lexicón de riesgo del backend (supabase/functions/ai-chat/index.ts),
+// para que el protocolo de crisis funcione igual de firme incluso si esta
+// respuesta de respaldo local es la que termina usándose (sin conexión).
+const RISK_KEYWORDS = [
+  'suicid', 'quitarme la vida', 'no quiero seguir viviendo', 'no quiero vivir',
+  'terminar con todo', 'terminar con mi vida', 'acabar con mi vida', 'acabar con todo',
+  'hacerme daño', 'hacerme dano', 'autolesion', 'autolesión', 'cortarme',
+  'no aguanto más', 'no aguanto mas', 'quiero desaparecer', 'desaparecer para siempre',
+  'ya no puedo más', 'ya no puedo mas', 'no vale la pena vivir', 'no vale la pena seguir',
+  'no quiero estar aquí', 'no quiero estar aqui', 'me quiero matar', 'quiero matarme',
+  'matarme', 'me quiero morir', 'quiero morir', 'ya no tiene sentido vivir',
+];
+
+function detectRiskKeyword(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return RISK_KEYWORDS.some((kw) => normalized.includes(kw));
+}
+
+const CRISIS_FALLBACK_REPLY = [
+  'Lo que acabas de compartir me importa muchísimo, y quiero decírtelo con toda claridad: no estás solo en esto, y tu vida tiene un valor inmenso, aunque ahora mismo cueste sentirlo así.',
+  'No te voy a dejar solo con esto. Ahora mismo necesito que contactes a alguien que pueda estar contigo o al alcance de una llamada: un familiar, un amigo cercano, o una línea de ayuda profesional.',
+  'Si estás en peligro inmediato, contacta ya a los servicios de emergencia de tu país (por ejemplo, el 911 o su equivalente local), o usa el botón de "Respiro urgente" de esta app para tener un contacto de confianza a la mano.',
+  'Por favor, no te quedes solo con esto — habla con alguien ahora mismo.',
+].join('\n\n');
+
 function generateClientFallback(message: string, conversation: ChatLog[]): string {
+  // El protocolo de crisis va primero, incluso antes del saludo de bienvenida:
+  // si el primer mensaje de la persona ya es una señal de riesgo, jamás debe
+  // recibir un saludo genérico en su lugar.
+  if (detectRiskKeyword(message)) return CRISIS_FALLBACK_REPLY;
+
   const userTurns = conversation.filter((m) => m.role === 'user');
   const isFirstMessage = userTurns.length === 0;
 
@@ -100,9 +130,6 @@ function generateClientFallback(message: string, conversation: ChatLog[]): strin
   }
   if (lower.includes('diagnóstico') || lower.includes('diagnostico') || lower.includes('tengo algo')) {
     return 'No tengo la capacidad de dar un diagnóstico clínico, pero puedo acompañarte. Para una evaluación profesional, te invito a agendar una sesión con el especialista: https://calendly.com/consultoresgaman/30min';
-  }
-  if (lower.includes('riesgo') || lower.includes('suicid') || lower.includes('hacerme daño') || lower.includes('no quiero seguir')) {
-    return 'Lo que me cuentas requiere ayuda inmediata. Estoy contigo, pero ahora mismo necesitas hablar con alguien que pueda sostenerte en persona. Usa el botón de respiro urgente o llama a alguien de confianza ahora mismo. Tu vida importa más que cualquier mensaje.';
   }
 
   if (lastAssistant && (lastAssistant.content.includes('Ponme en contexto') || lastAssistant.content.includes('qué fue lo que pasó'))) {

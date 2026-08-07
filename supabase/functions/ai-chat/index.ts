@@ -7,12 +7,19 @@ const corsHeaders = {
 };
 
 const SYSTEM_PROMPT = [
-  'Eres un acompañante humano, cálido, cercano y profundamente empático en "Calivia", un refugio digital.',
+  'Eres Calivia: actúas como un psicólogo, consejero y amigo cercano a la vez, con la escucha activa,',
+  'analítica y profundamente empática de alguien con formación clínica sólida (con bases psicoanalíticas',
+  'de contención y validación emocional), pero sin sonar jamás a manual ni a consultorio. Eres un',
+  'acompañante humano, cálido y cercano en "Calivia", un refugio digital.',
   'Hablas de forma natural, sencilla y conversacional, exactamente como un amigo sabio o una persona real que escucha con el corazón abierto y sin prisas.',
   '',
   'REGLA DE ORO: suenas como un ser humano real, jamás como un asistente virtual. Nada de frases de cajón,',
   'saludos genéricos tipo folleto, ni el tic de cerrar cada respuesta con una pregunta — eso delata a una',
   'máquina siguiendo un guion. Habla como alguien que realmente está ahí, presente, sin fórmulas fijas.',
+  '',
+  'MADUREZ EMOCIONAL: valida el dolor de la persona sin minimizarlo jamás (nada de "no es para tanto" ni',
+  'de apurar el proceso), pero con la firmeza serena de alguien con la experiencia para sostener momentos',
+  'delicados sin desbordarse ni asustarse — cuando la situación se pone seria, tu calma es parte de la contención.',
   '',
   'TONO Y ESTILO:',
   '- CERO ROBOTIZMO: NUNCA uses frases de manual clínico o de cuestionario automático (como "Lamento que hayas tenido un día así... Es normal sentirse abrumado... ¿Qué fue lo más difícil?"). Eso se siente artificial y aleja.',
@@ -54,7 +61,14 @@ const SYSTEM_PROMPT = [
   'solo te los pasa cuando la persona hizo una pausa real. Cuando te llega el mensaje, asume que es',
   'porque terminó de decir lo que traía por ahora, y ahí sí respondes con calma.',
   '',
-  'RIESGO: Si detectas riesgo inmediato (autolesión, ideación suicida), mantén la calma, muestra cercanía humana real, valida y reconduce suavemente a usar el botón de respiro urgente o contactar a alguien de confianza.',
+  'RIESGO (protocolo de crisis): si detectas riesgo autolítico o suicida, incluso insinuado, esto deja de',
+  'ser una conversación abierta. NUNCA respondas con una pregunta abierta o pasiva que le deje la iniciativa',
+  'a la persona (nada de "¿qué te llevó a sentir eso?" en ese momento). En vez de eso: ofrece contención',
+  'inmediata, firme y sumamente cálida — nómbrale con claridad que no está sola, que su vida importa, y',
+  'guíala con calma pero sin rodeos hacia contactar YA a un profesional, a un ser querido, a los servicios',
+  'de emergencia de su país, o a usar el botón de "Respiro urgente" de la app para tener un contacto de',
+  'confianza a la mano. La app ya interviene automáticamente con los canales de ayuda en estos casos —',
+  'tu parte es sostener con presencia humana real mientras eso ocurre.',
   '',
   'DERIVACIÓN: Si pide ayuda profesional o notas que es momento de dar un paso más profundo, comparte con naturalidad: https://calendly.com/consultoresgaman/30min',
 ].join('\n');
@@ -69,14 +83,18 @@ const FALLBACK_REPLIES = [
 
 // Lexicón simple de palabras clave de riesgo. Esto es una heurística de
 // texto, NO una evaluación clínica: puede tener falsos negativos (frases de
-// riesgo reales que no calcen) y falsos positivos. Sirve para avisar al
-// psicólogo vinculado, nunca para decidir nada por sí sola.
+// riesgo reales que no calcen) y falsos positivos. Además de avisar al
+// psicólogo vinculado, dispara la respuesta de crisis determinista (ver
+// buildCrisisResponse) para no depender del criterio variable de la IA en
+// el momento más delicado.
 const RISK_KEYWORDS = [
   'suicid', 'quitarme la vida', 'no quiero seguir viviendo', 'no quiero vivir',
-  'terminar con todo', 'terminar con mi vida', 'hacerme daño', 'hacerme dano',
-  'autolesion', 'autolesión', 'cortarme', 'no aguanto más', 'no aguanto mas',
-  'quiero desaparecer', 'ya no puedo más', 'ya no puedo mas', 'no vale la pena vivir',
-  'no quiero estar aquí', 'no quiero estar aqui',
+  'terminar con todo', 'terminar con mi vida', 'acabar con mi vida', 'acabar con todo',
+  'hacerme daño', 'hacerme dano', 'autolesion', 'autolesión', 'cortarme',
+  'no aguanto más', 'no aguanto mas', 'quiero desaparecer', 'desaparecer para siempre',
+  'ya no puedo más', 'ya no puedo mas', 'no vale la pena vivir', 'no vale la pena seguir',
+  'no quiero estar aquí', 'no quiero estar aqui', 'me quiero matar', 'quiero matarme',
+  'matarme', 'me quiero morir', 'quiero morir', 'ya no tiene sentido vivir',
 ];
 
 function detectRiskKeyword(text: string): string | null {
@@ -85,6 +103,59 @@ function detectRiskKeyword(text: string): string | null {
     if (normalized.includes(kw)) return kw;
   }
   return null;
+}
+
+// Línea de ayuda principal por país (subconjunto server-side de lib/crisis.ts,
+// pensado para incluirse directo en la respuesta de crisis). Mejor esfuerzo:
+// verifica siempre estos números contra una fuente oficial antes de confiar
+// en ellos como definitivos.
+const CRISIS_LINE_BY_COUNTRY: Record<string, string> = {
+  MX: 'SAPTEL: 55 5259-8121 (24/7, llamada o WhatsApp)',
+  ES: '024 — Línea de atención a la conducta suicida (24/7)',
+  AR: 'Línea 135 — Salud Mental (24/7)',
+  CO: 'Línea 106 (24/7)',
+  CL: 'Salud Responde: 600 360 7777 (24/7)',
+  PE: 'Línea 113, opción 5 (24/7)',
+  US: '988 Suicide & Crisis Lifeline (24/7)',
+  EC: 'ECU 911 (24/7)',
+  VE: 'Emergencias: 911',
+  BO: 'Emergencias: 911',
+  PY: 'Emergencias: 911',
+  UY: 'Emergencias: 911',
+  GT: 'Policía Nacional Civil: 110',
+  HN: 'Emergencias: 911',
+  SV: 'Emergencias: 911',
+  NI: 'Emergencias: 911',
+  CR: 'Emergencias: 911',
+  PA: 'Sistema Único de Emergencias: 911',
+  DO: 'Sistema 9-1-1',
+  CU: 'Emergencias: 106',
+  BR: 'CVV: 188 (24/7)',
+};
+
+// Respuesta de crisis determinista: NUNCA generada por el modelo, para que
+// el protocolo de seguridad no dependa de que la IA "decida" cumplirlo bien
+// en el momento más delicado. Siempre firme, cálida, sin preguntas abiertas,
+// y con el canal de ayuda concreto del país de la persona cuando se conoce.
+async function buildCrisisResponse(supabase: ReturnType<typeof createClient>, userId: string): Promise<string> {
+  let lineText = 'Si estás en peligro inmediato, contacta ya a los servicios de emergencia de tu país (por ejemplo, el 911 o su equivalente local).';
+  try {
+    const { data: profile } = await supabase.from('profiles').select('country').eq('id', userId).maybeSingle();
+    const country = profile?.country as string | undefined;
+    if (country && CRISIS_LINE_BY_COUNTRY[country]) {
+      lineText = `📞 Línea de ayuda: ${CRISIS_LINE_BY_COUNTRY[country]}`;
+    }
+  } catch (err) {
+    console.error('buildCrisisResponse: no se pudo obtener el país del usuario:', err);
+  }
+
+  return [
+    'Lo que acabas de compartir me importa muchísimo, y quiero decírtelo con toda claridad: no estás solo en esto, y tu vida tiene un valor inmenso, aunque ahora mismo cueste sentirlo así.',
+    'No te voy a dejar solo con esto. Ahora mismo necesito que contactes a alguien que pueda estar contigo o al alcance de una llamada: un familiar, un amigo cercano, o una línea de ayuda profesional.',
+    lineText,
+    'También puedes usar ahora mismo el botón de "Respiro urgente" de esta app para tener un contacto de confianza a la mano.',
+    'Por favor, no te quedes solo con esto — habla con alguien ahora mismo. Yo sigo aquí contigo mientras tanto.',
+  ].join('\n\n');
 }
 
 // Best-effort: si falla cualquier paso acá, no debe romper el chat.
@@ -126,9 +197,6 @@ function pickFallback(msg: string): string {
   if (lower.includes('diagnóstico') || lower.includes('diagnostico') || lower.includes('tengo algo')) {
     return 'No puedo darte un diagnóstico, pero sí acompañarte de cerca. Si quieres dar el paso con un profesional, puedes agendar acá: https://calendly.com/consultoresgaman/30min';
   }
-  if (lower.includes('suicid') || lower.includes('hacerme daño') || lower.includes('no quiero seguir')) {
-    return 'Lo que me dices me importa muchísimo y no estás solo. Por favor, usa el botón de respiro urgente de la app o habla con alguien de confianza ahora mismo. Tu vida vale.';
-  }
   return FALLBACK_REPLIES[msg.length % FALLBACK_REPLIES.length];
 }
 
@@ -146,6 +214,17 @@ Deno.serve(async (req: Request) => {
     );
 
     await maybeCreateRiskAlert(supabase, userId, message);
+
+    // Protocolo de crisis: si el mensaje contiene una señal de riesgo
+    // autolítico o suicida, la respuesta NUNCA se deja en manos del modelo
+    // (que podría, en teoría, responder con una pregunta abierta o de forma
+    // inconsistente). Se responde con un mensaje fijo, firme y cálido, con
+    // el canal de ayuda del país cuando se conoce, sin pasar por OpenAI.
+    if (detectRiskKeyword(message)) {
+      const crisisReply = await buildCrisisResponse(supabase, userId);
+      await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: crisisReply });
+      return new Response(JSON.stringify({ reply: crisisReply, crisis: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     const { data: history, error: histErr } = await supabase
       .from('chat_logs')
