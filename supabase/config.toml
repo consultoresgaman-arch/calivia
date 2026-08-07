@@ -1,0 +1,6 @@
+# Lemon Squeezy no puede enviar un JWT de Supabase en sus webhooks (solo
+# manda su propia firma HMAC en el header X-Signature, verificada dentro de
+# la función). Sin esto, la plataforma de Supabase rechaza cada llamada con
+# 401 antes de que nuestro código llegue a comprobar la firma.
+[functions.lemonsqueezy-webhook]
+verify_jwt = false
