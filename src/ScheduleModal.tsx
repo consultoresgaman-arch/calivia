@@ -60,17 +60,17 @@ export default function ScheduleModal({ open, onClose, isPremium, userId, name }
         {isPremium ? (
           <p className="schedule-price schedule-price-premium">
             <Sparkles size={15} strokeWidth={2} />
-            Inversión preferencial por ser miembro: <strong>$25.000 CLP</strong>
+            Inversión preferencial por ser miembro: <strong>$25.000 CLP</strong> <span>(~$27 USD)</span>
           </p>
         ) : (
           <>
             <p className="schedule-price">
               <CalendarClock size={15} strokeWidth={2} />
-              Inversión por la sesión: <strong>$35.000 CLP</strong>
+              Inversión por la sesión: <strong>$35.000 CLP</strong> <span>(~$38 USD)</span>
             </p>
             {isCheckoutConfigured() && (
               <button type="button" className="schedule-upsell" onClick={() => openCheckout({ userId, name })}>
-                ¿Quieres ahorrar $10.000 CLP en esta sesión? Hazte miembro Premium aquí
+                ¿Quieres ahorrar $10.000 CLP (~$11 USD) en esta sesión? Hazte miembro Premium aquí
               </button>
             )}
           </>
@@ -101,6 +101,7 @@ export default function ScheduleModal({ open, onClose, isPremium, userId, name }
         }
         .schedule-price { margin: 0; display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text); flex-wrap: wrap; }
         .schedule-price strong { color: var(--primary-600); }
+        .schedule-price span { color: var(--text-soft); font-weight: 500; font-size: 12px; }
         .schedule-price-premium {
           padding: 7px 10px; margin: -1px -2px 1px; border-radius: 10px;
           background: rgba(196,154,90,0.10); color: var(--text);
