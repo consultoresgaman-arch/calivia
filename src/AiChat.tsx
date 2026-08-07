@@ -11,12 +11,22 @@ interface MicPermissionPlugin {
 
 const MicPermission = registerPlugin<MicPermissionPlugin>('MicPermission');
 
+// Nombres conocidos de voces en español cálidas/femeninas de los motores de
+// alta calidad más comunes (Google, Microsoft/Edge), para preferirlas cuando
+// estén disponibles. Es una heurística de nombre, no una garantía.
+const WARM_VOICE_NAMES = [
+  'elvira', 'helena', 'sabina', 'paulina', 'monica', 'mónica', 'lucia', 'lucía',
+  'esperanza', 'conchita', 'lupe', 'dalia', 'salome', 'salomé', 'camila', 'valentina',
+];
+
 function voiceQualityScore(v: SpeechSynthesisVoice): number {
   const n = `${v.name} ${v.voiceURI}`.toLowerCase();
   let score = 0;
   if (n.includes('google')) score += 4;
+  if (n.includes('microsoft')) score += 4;
   if (n.includes('neural') || n.includes('natural')) score += 4;
   if (n.includes('network') || n.includes('online') || n.includes('cloud') || n.includes('plus')) score += 2;
+  if (WARM_VOICE_NAMES.some((name) => n.includes(name))) score += 3;
   if (v.localService === false) score += 1;
   if (n.includes('compact') || n.includes('robot') || n.includes('espeak')) score -= 5;
   return score;
@@ -148,6 +158,8 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   const [selectedVoiceUri, setSelectedVoiceUri] = useState<string>('');
   const [voicesLoading, setVoicesLoading] = useState(true);
   const hasSelectedVoiceRef = useRef(false);
+  const [ttsBlocked, setTtsBlocked] = useState(false);
+  const lastReplyRef = useRef<string>('');
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
@@ -220,21 +232,43 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   }, []);
 
   function speakResponse(text: string) {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    lastReplyRef.current = text;
+    try {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      
-      if (voices.length > 0 && selectedVoiceUri) {
-        const chosenVoice = voices.find((v) => v.voiceURI === selectedVoiceUri);
-        if (chosenVoice) {
-          utterance.voice = chosenVoice;
-        }
-      }
 
-      utterance.rate = 0.93;
-      utterance.pitch = 0.96;
+      let chosenVoice: SpeechSynthesisVoice | undefined;
+      if (voices.length > 0 && selectedVoiceUri) {
+        chosenVoice = voices.find((v) => v.voiceURI === selectedVoiceUri);
+        if (chosenVoice) utterance.voice = chosenVoice;
+      }
+      utterance.lang = chosenVoice?.lang || 'es-ES';
+      utterance.rate = 0.95;
+      utterance.pitch = 1;
+
+      // Algunos navegadores bloquean la reproducción automática de audio por
+      // políticas de seguridad si no hay un gesto directo del usuario en ese
+      // instante. Si el motor nunca llega a "empezar" a hablar, lo tratamos
+      // como bloqueado y mostramos un botón para activarlo con un toque.
+      let started = false;
+      utterance.onstart = () => { started = true; setTtsBlocked(false); };
+      utterance.onerror = (e) => {
+        console.error('[Calivia] speechSynthesis onerror:', (e as any).error);
+        if (!started) setTtsBlocked(true);
+      };
       window.speechSynthesis.speak(utterance);
+      window.setTimeout(() => {
+        if (!started && window.speechSynthesis.speaking === false) setTtsBlocked(true);
+      }, 600);
+    } catch (err) {
+      console.error('[Calivia] speakResponse falló:', err);
+      setTtsBlocked(true);
     }
+  }
+
+  function replayLastResponse() {
+    if (lastReplyRef.current) speakResponse(lastReplyRef.current);
   }
 
   useEffect(() => () => {
@@ -588,6 +622,11 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           Calivia está en modo de respaldo. Tus mensajes siguen siendo escuchados.
         </div>
       )}
+      {ttsBlocked && (
+        <button type="button" className="tts-blocked-note" onClick={replayLastResponse}>
+          <Volume2 size={14} strokeWidth={2} /><span>Tu navegador bloqueó el audio automático — toca aquí para escuchar la respuesta</span>
+        </button>
+      )}
       {error && <div className="chat-error">{error}</div>}
       {limitReached && !sending && (
         <div className="chat-limit">
@@ -722,6 +761,14 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           border-radius: var(--radius-xs); font-size: 12px;
           text-align: center; font-weight: 500;
         }
+        .tts-blocked-note {
+          display: flex; align-items: center; justify-content: center; gap: 6px;
+          width: 100%; margin: 8px 0; padding: 9px 12px;
+          background: rgba(112,130,56,0.08); color: var(--primary);
+          border: 1px dashed var(--primary-200); border-radius: var(--radius-xs);
+          font-size: 12.5px; font-weight: 600; cursor: pointer;
+        }
+        .tts-blocked-note:hover { background: rgba(112,130,56,0.14); }
         .chat-error {
           margin: 8px 2px; padding: 10px 14px;
           background: var(--danger-bg); color: var(--danger);
