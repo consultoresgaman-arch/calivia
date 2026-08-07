@@ -249,7 +249,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
       />
 
       <style>{`
-        .app-header { position: sticky; top: 0; z-index: 40; background: rgba(245,243,238,0.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-soft); }
+        .app-header { position: sticky; top: 0; z-index: 40; background: rgba(26,29,26,0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.08); }
         .header-inner { max-width: 560px; margin: 0 auto; padding: 12px 20px; padding-top: max(12px, env(safe-area-inset-top)); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
         .brand { display: flex; align-items: center; gap: 8px; }
         .brand-logo-img { height: 30px; width: auto; display: block; }

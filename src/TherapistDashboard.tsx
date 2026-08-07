@@ -304,9 +304,9 @@ export default function TherapistDashboard() {
         <style>{`
           .th-header {
             position: sticky; top: 0; z-index: 40;
-            background: rgba(245,243,238,0.88);
+            background: rgba(26,29,26,0.85);
             backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--border-soft);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
           }
           .th-header-inner {
             max-width: 1100px; margin: 0 auto;
@@ -316,9 +316,9 @@ export default function TherapistDashboard() {
           }
           .brand { display: flex; align-items: center; gap: 10px; }
           .brand-logo-img { height: 32px; width: auto; display: block; }
-          .brand-sub { font-size: 12px; color: var(--text-soft); display: block; }
+          .brand-sub { font-size: 12px; color: var(--dark-text-soft); display: block; }
           .th-user { display: flex; align-items: center; gap: 10px; }
-          .th-user-name { font-size: 14px; font-weight: 600; color: var(--text-soft); }
+          .th-user-name { font-size: 14px; font-weight: 600; color: var(--dark-text-soft); }
           .th-logout { width: 36px; height: 36px; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); border-radius: 50%; cursor: pointer; display: grid; place-items: center; transition: all 0.15s; }
           .th-logout:hover { background: var(--danger-bg); color: var(--danger); border-color: rgba(196,91,74,0.2); }
 
