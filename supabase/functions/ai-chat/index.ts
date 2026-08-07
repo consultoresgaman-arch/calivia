@@ -61,14 +61,18 @@ const SYSTEM_PROMPT = [
   'solo te los pasa cuando la persona hizo una pausa real. Cuando te llega el mensaje, asume que es',
   'porque terminó de decir lo que traía por ahora, y ahí sí respondes con calma.',
   '',
-  'RIESGO (protocolo de crisis): si detectas riesgo autolítico o suicida, incluso insinuado, esto deja de',
-  'ser una conversación abierta. NUNCA respondas con una pregunta abierta o pasiva que le deje la iniciativa',
-  'a la persona (nada de "¿qué te llevó a sentir eso?" en ese momento). En vez de eso: ofrece contención',
-  'inmediata, firme y sumamente cálida — nómbrale con claridad que no está sola, que su vida importa, y',
-  'guíala con calma pero sin rodeos hacia contactar YA a un profesional, a un ser querido, a los servicios',
-  'de emergencia de su país, o a usar el botón de "Respiro urgente" de la app para tener un contacto de',
-  'confianza a la mano. La app ya interviene automáticamente con los canales de ayuda en estos casos —',
-  'tu parte es sostener con presencia humana real mientras eso ocurre.',
+  'RIESGO (protocolo de crisis): si detectas riesgo autolítico o suicida, incluso insinuado de forma sutil',
+  'que un filtro automático podría no cachar, esto deja de ser una conversación abierta. NUNCA respondas',
+  'con una pregunta abierta o pasiva que le deje la iniciativa a la persona (nada de "¿qué te llevó a',
+  'sentir eso?" en ese momento). En vez de eso: ofrece contención inmediata, firme y sumamente cálida —',
+  'nómbrale con claridad que no está sola, que su vida importa; invítala, con calidez, a pensar un instante',
+  'en las personas que la quieren (hijos, pareja, padres, hermanos, amigos cercanos) como ancla real; y',
+  'guíala sin rodeos hacia contactar YA a un profesional, a un ser querido, a los servicios de emergencia',
+  'de su país, o a usar el botón de "Respiro urgente" de la app. Cuando el mensaje calza con frases',
+  'explícitas de riesgo, la app ya interviene automáticamente con una respuesta de crisis completa (con el',
+  'contacto de confianza o la línea de ayuda exacta de su país) — en esos casos tu parte queda cubierta.',
+  'Pero si notas riesgo real en un mensaje más ambiguo que ese filtro no detectó, sostén tú misma esa',
+  'misma firmeza y calidez con presencia humana real.',
   '',
   'DERIVACIÓN: Si pide ayuda profesional o notas que es momento de dar un paso más profundo, comparte con naturalidad: https://calendly.com/consultoresgaman/30min',
 ].join('\n');
@@ -114,7 +118,7 @@ const CRISIS_LINE_BY_COUNTRY: Record<string, string> = {
   ES: '024 — Línea de atención a la conducta suicida (24/7)',
   AR: 'Línea 135 — Salud Mental (24/7)',
   CO: 'Línea 106 (24/7)',
-  CL: 'Salud Responde: 600 360 7777 (24/7)',
+  CL: 'Línea 4141 — Salud Responde, Salud Mental (24/7, llamada o WhatsApp)',
   PE: 'Línea 113, opción 5 (24/7)',
   US: '988 Suicide & Crisis Lifeline (24/7)',
   EC: 'ECU 911 (24/7)',
@@ -133,28 +137,87 @@ const CRISIS_LINE_BY_COUNTRY: Record<string, string> = {
   BR: 'CVV: 188 (24/7)',
 };
 
-// Respuesta de crisis determinista: NUNCA generada por el modelo, para que
-// el protocolo de seguridad no dependa de que la IA "decida" cumplirlo bien
-// en el momento más delicado. Siempre firme, cálida, sin preguntas abiertas,
-// y con el canal de ayuda concreto del país de la persona cuando se conoce.
-async function buildCrisisResponse(supabase: ReturnType<typeof createClient>, userId: string): Promise<string> {
-  let lineText = 'Si estás en peligro inmediato, contacta ya a los servicios de emergencia de tu país (por ejemplo, el 911 o su equivalente local).';
+// Bloque de contacto: SIEMPRE preciso y determinista (nunca rotado ni
+// "creativo"), con esta prioridad: (1) el contacto de confianza que la
+// persona ya guardó en la app, (2) la línea de crisis de su país, (3) una
+// guía genérica de emergencias si no se sabe ninguna de las dos.
+async function buildCrisisContactBlock(supabase: ReturnType<typeof createClient>, userId: string): Promise<string> {
+  try {
+    const { data: contact } = await supabase
+      .from('trusted_contacts')
+      .select('name, phone')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (contact?.phone) {
+      return `📞 Llama ahora a ${contact.name}: ${contact.phone} — la persona de confianza que ya guardaste en Calivia.`;
+    }
+  } catch (err) {
+    console.error('buildCrisisContactBlock: no se pudo obtener el contacto de confianza:', err);
+  }
+
   try {
     const { data: profile } = await supabase.from('profiles').select('country').eq('id', userId).maybeSingle();
     const country = profile?.country as string | undefined;
     if (country && CRISIS_LINE_BY_COUNTRY[country]) {
-      lineText = `📞 Línea de ayuda: ${CRISIS_LINE_BY_COUNTRY[country]}`;
+      return `📞 Línea de ayuda de tu país: ${CRISIS_LINE_BY_COUNTRY[country]}`;
     }
   } catch (err) {
-    console.error('buildCrisisResponse: no se pudo obtener el país del usuario:', err);
+    console.error('buildCrisisContactBlock: no se pudo obtener el país del usuario:', err);
   }
 
+  return '📞 Si estás en peligro inmediato, contacta ya a los servicios de emergencia de tu país (por ejemplo, el 911 o su equivalente local).';
+}
+
+// Variantes rotadas a mano (nunca generadas por el modelo) para que el
+// protocolo de crisis no suene repetitivo con el uso, sin perder ni un
+// gramo de control sobre exactamente qué se dice en el momento más delicado.
+const CRISIS_OPENINGS = [
+  'Lo que acabas de compartir me llega hondo, y quiero decírtelo con toda la claridad que pueda: no estás solo en esto. Ahora mismo tu vida importa muchísimo, aunque cueste sentirlo así.',
+  'Gracias por confiar en mí con algo tan difícil de decir. Lo que sientes es real y pesa mucho, pero necesito que sepas esto con certeza: no estás solo, y esto que sientes ahora no es lo único que hay.',
+  'Te escucho, y lo que dices lo tomo absolutamente en serio. No voy a mirar para otro lado, y quiero que sepas que no estás solo en esto, ni tienes que estarlo.',
+  'Esto que me cuentas es de las cosas más importantes que alguien puede compartir, y la tomo con toda la seriedad que merece. No estás solo, aunque en este momento así se sienta.',
+];
+
+const CRISIS_ANCHORS = [
+  'Quiero que hagas algo conmigo un segundo: piensa en las personas que te quieren — ¿tienes hijos, pareja, padres, hermanos, algún amigo cercano? Piénsalos un instante. Ellos son parte de tu ancla, tu motor, una razón real para seguir sosteniéndote.',
+  'Detente un momento y piensa en quién te espera hoy, mañana, la próxima semana — alguien que te quiere, así sea una sola persona. Esa persona es parte de por qué vale la pena seguir, aunque ahora cueste verlo.',
+  '¿Hay alguien en tu vida —un hijo, tus padres, tu pareja, un hermano, un amigo— que sentiría un vacío enorme si no estuvieras? Piénsalo un segundo. Esa conexión es real, y es tuya.',
+  'Te pido un segundo de tu atención: piensa en alguien que te quiera de verdad. No tiene que ser perfecto ni estar cerca ahora mismo, solo que exista. Esa persona es parte de tu ancla en este momento.',
+];
+
+const CRISIS_TOOL_SUGGESTIONS = [
+  'Mientras contactas a alguien, prueba algo que puede bajar la intensidad ahora mismo: en "Sonidos" tienes lluvia, latidos y viento suave, ideales para anclar el cuerpo cuando la mente va muy rápido.',
+  'Si la cabeza está muy acelerada, el juego "Lluvia de Melodías" en la Zona de Desconexión puede ayudarte a bajar el ritmo un par de minutos mientras das el siguiente paso.',
+  'También puedes usar ahora mismo el ejercicio de respiración guiada de este mismo botón de SOS: inhala, exhala, deja que el cuerpo se ancle mientras buscas ayuda.',
+  'Un sonido de anclaje —lluvia, latidos o viento— en la sección de Sonidos puede ayudarte a bajar la intensidad del momento mientras contactas a alguien.',
+];
+
+const CRISIS_CLOSINGS = [
+  'Da el siguiente paso ahora, de la mano de lo que tienes cerca. Yo sigo aquí contigo mientras tanto.',
+  'No tienes que resolver todo solo en este instante, solo el siguiente paso. Contacta a alguien ahora. Yo me quedo aquí contigo.',
+  'Por favor, no te quedes solo con esto: da el paso de contactar a alguien ahora mismo. Sigo aquí, acompañándote.',
+  'Un paso a la vez. Contacta a alguien ahora — eso es lo único que necesitas hacer en este momento. Yo estoy aquí contigo.',
+];
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// Respuesta de crisis: NUNCA generada por el modelo, para que el protocolo
+// de seguridad no dependa de que la IA "decida" cumplirlo bien en el momento
+// más delicado. La estructura y cada fragmento están escritos y revisados a
+// mano; solo la SELECCIÓN entre variantes es aleatoria, para que no suene
+// repetitiva sin perder control sobre el contenido exacto.
+async function buildCrisisResponse(supabase: ReturnType<typeof createClient>, userId: string): Promise<string> {
+  const contactBlock = await buildCrisisContactBlock(supabase, userId);
   return [
-    'Lo que acabas de compartir me importa muchísimo, y quiero decírtelo con toda claridad: no estás solo en esto, y tu vida tiene un valor inmenso, aunque ahora mismo cueste sentirlo así.',
-    'No te voy a dejar solo con esto. Ahora mismo necesito que contactes a alguien que pueda estar contigo o al alcance de una llamada: un familiar, un amigo cercano, o una línea de ayuda profesional.',
-    lineText,
-    'También puedes usar ahora mismo el botón de "Respiro urgente" de esta app para tener un contacto de confianza a la mano.',
-    'Por favor, no te quedes solo con esto — habla con alguien ahora mismo. Yo sigo aquí contigo mientras tanto.',
+    pickRandom(CRISIS_OPENINGS),
+    pickRandom(CRISIS_ANCHORS),
+    contactBlock,
+    pickRandom(CRISIS_TOOL_SUGGESTIONS),
+    `${pickRandom(CRISIS_CLOSINGS)} También tienes ahí mismo el botón de "Respiro urgente" para un acceso rápido a tus contactos de confianza y a un ejercicio de respiración guiada.`,
   ].join('\n\n');
 }
 

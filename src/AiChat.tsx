@@ -104,10 +104,10 @@ function detectRiskKeyword(text: string): boolean {
 }
 
 const CRISIS_FALLBACK_REPLY = [
-  'Lo que acabas de compartir me importa muchísimo, y quiero decírtelo con toda claridad: no estás solo en esto, y tu vida tiene un valor inmenso, aunque ahora mismo cueste sentirlo así.',
-  'No te voy a dejar solo con esto. Ahora mismo necesito que contactes a alguien que pueda estar contigo o al alcance de una llamada: un familiar, un amigo cercano, o una línea de ayuda profesional.',
-  'Si estás en peligro inmediato, contacta ya a los servicios de emergencia de tu país (por ejemplo, el 911 o su equivalente local), o usa el botón de "Respiro urgente" de esta app para tener un contacto de confianza a la mano.',
-  'Por favor, no te quedes solo con esto — habla con alguien ahora mismo.',
+  'Lo que acabas de compartir me llega hondo, y quiero decírtelo con toda claridad: no estás solo en esto, y tu vida tiene un valor inmenso, aunque ahora mismo cueste sentirlo así.',
+  'Piensa un segundo en las personas que te quieren —hijos, pareja, padres, hermanos, algún amigo cercano— y sostente en esa idea un momento: son parte de tu ancla, tu motor, una razón real para seguir.',
+  'Si estás en peligro inmediato, contacta ya a los servicios de emergencia de tu país (por ejemplo, el 911 o su equivalente local). Mientras tanto, un sonido de anclaje en "Sonidos" (lluvia, latidos, viento) puede ayudarte a bajar la intensidad.',
+  'Usa ahora mismo el botón de "Respiro urgente" de esta app para tener a la mano un contacto de confianza y un ejercicio de respiración guiada. No te quedes solo con esto — habla con alguien ahora.',
 ].join('\n\n');
 
 function generateClientFallback(message: string, conversation: ChatLog[]): string {

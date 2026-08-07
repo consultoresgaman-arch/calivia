@@ -41,8 +41,7 @@ export const CRISIS_LINES: Record<string, { label: string; lines: CrisisLine[] }
   CL: {
     label: 'Chile',
     lines: [
-      { name: 'Salud Responde', phone: '600 360 7777', hours: '24/7' },
-      { name: 'Teléfono de la Esperanza', phone: '600 805 333', hours: '24/7' },
+      { name: 'Línea 4141 (Salud Responde — Salud Mental)', phone: '4141', hours: '24/7', notes: 'Llamada o WhatsApp' },
       { name: 'Emergencias', phone: '131', hours: '24/7' },
     ],
   },
