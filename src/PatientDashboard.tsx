@@ -247,7 +247,13 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         userId={profile!.id}
         name={profile?.full_name}
       />
-      <ScheduleModal open={scheduleOpen} onClose={() => setScheduleOpen(false)} />
+      <ScheduleModal
+        open={scheduleOpen}
+        onClose={() => setScheduleOpen(false)}
+        isPremium={isPremium}
+        userId={profile!.id}
+        name={profile?.full_name}
+      />
 
       <style>{`
         .app-header { position: sticky; top: 0; z-index: 40; background: rgba(26,29,26,0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.08); }
