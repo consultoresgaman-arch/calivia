@@ -6,6 +6,7 @@ import AiChat from './AiChat';
 import FreemiumBanner from './FreemiumBanner';
 import SosModal from './SosModal';
 import DisconnectionZone from './DisconnectionZone';
+import ScheduleModal from './ScheduleModal';
 import WeeklyProgress from './WeeklyProgress';
 import TaskManager from './TaskManager';
 import SoundGallery from './SoundGallery';
@@ -14,7 +15,6 @@ import JournalSpace from './JournalSpace';
 import MicroPause from './MicroPause';
 
 const MAX_FREE_MESSAGES = 20;
-const CALENDLY_URL = 'https://calendly.com/consultoresgaman/30min';
 
 type Section = 'chat' | 'breathe' | 'games' | 'progress' | 'tasks' | 'sounds' | 'journal';
 
@@ -28,6 +28,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const [messagesSent, setMessagesSent] = useState(0);
   const [sosOpen, setSosOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [savingRecoveryEmail, setSavingRecoveryEmail] = useState(false);
@@ -82,17 +83,16 @@ export default function PatientDashboard({ onExitToHome }: Props) {
                 <span className="hdr-btn-label">Inicio</span>
               </button>
             )}
-            <a
+            <button
               className="hdr-btn hdr-btn-calendly"
-              href={CALENDLY_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={() => setScheduleOpen(true)}
+              type="button"
               aria-label="Agendar consulta con un especialista"
               title="Agendar consulta"
             >
               <CalendarClock size={16} strokeWidth={2} />
               <span className="hdr-btn-label">Agendar</span>
-            </a>
+            </button>
             <div className="user-chip" onClick={() => setMenuOpen((o) => !o)}>
               <div className="user-avatar">{(profile?.full_name || '?').charAt(0).toUpperCase()}</div>
               {menuOpen && (
@@ -247,6 +247,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         userId={profile!.id}
         name={profile?.full_name}
       />
+      <ScheduleModal open={scheduleOpen} onClose={() => setScheduleOpen(false)} />
 
       <style>{`
         .app-header { position: sticky; top: 0; z-index: 40; background: rgba(26,29,26,0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.08); }
@@ -282,6 +283,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         .user-menu-recovery-msg { margin: 2px 0 0; font-size: 11px; color: var(--primary-600); }
         .user-menu-logout { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border: none; background: var(--surface-2); color: var(--text-soft); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
         .user-menu-logout:hover { background: var(--danger-bg); color: var(--danger); }
+
 
         .refugio { max-width: 560px; margin: 0 auto; padding: 16px 20px 100px; display: flex; flex-direction: column; gap: 16px; min-height: calc(100vh - 60px); }
 
