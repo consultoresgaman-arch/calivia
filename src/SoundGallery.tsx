@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CloudRain, HeartPulse, Wind, Lock, Play, Pause } from 'lucide-react';
 import { openCheckout } from './lib/payments';
+import { useHeartbeatSound } from './lib/useHeartbeatSound';
 
 interface Props {
   isPremium: boolean;
@@ -99,62 +100,22 @@ export default function SoundGallery({ isPremium, userId, name }: Props) {
     };
   }
 
-  function playHeartbeat(ctx: AudioContext) {
-    let active = true;
-    const masterGain = ctx.createGain();
-    masterGain.gain.value = 0.42;
-    masterGain.connect(ctx.destination);
-    nodesRef.current = [masterGain];
-
-    function thump(delay: number) {
-      if (!active) return;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 55;
-      gain.gain.setValueAtTime(0, ctx.currentTime + delay);
-      gain.gain.linearRampToValueAtTime(1, ctx.currentTime + delay + 0.03);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.35);
-      osc.connect(gain); gain.connect(masterGain);
-      osc.start(ctx.currentTime + delay);
-      osc.stop(ctx.currentTime + delay + 0.4);
-
-      // Armónico una octava arriba: la fundamental de 55Hz por sí sola apenas
-      // se oye en altavoces de celular (ruedan por debajo de ~150-200Hz), así
-      // que este componente es el que realmente da presencia ahí, sin perder
-      // el cuerpo grave en auriculares o parlantes más grandes.
-      const harmonic = ctx.createOscillator();
-      const harmonicGain = ctx.createGain();
-      harmonic.type = 'sine';
-      harmonic.frequency.value = 110;
-      harmonicGain.gain.setValueAtTime(0, ctx.currentTime + delay);
-      harmonicGain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + delay + 0.03);
-      harmonicGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.3);
-      harmonic.connect(harmonicGain); harmonicGain.connect(masterGain);
-      harmonic.start(ctx.currentTime + delay);
-      harmonic.stop(ctx.currentTime + delay + 0.35);
-    }
-
-    function cycle(t: number) {
-      if (!active) return;
-      thump(t);
-      thump(t + 0.22);
-      timeoutId = window.setTimeout(() => cycle(0), 950);
-    }
-    let timeoutId = window.setTimeout(() => cycle(0), 0);
-
-    stopFnRef.current = () => {
-      active = false;
-      clearTimeout(timeoutId);
-      masterGain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.3);
-    };
-  }
+  const heartbeat = useHeartbeatSound();
 
   async function toggle(sound: SoundDef) {
     if (sound.locked) {
       openCheckout({ userId, name });
       return;
     }
+
+    if (sound.id === 'heartbeat') {
+      stopCurrent();
+      setPlaying(null);
+      heartbeat.toggle();
+      return;
+    }
+
+    heartbeat.stop();
     const ctx = ensureCtx();
     if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* ignore */ } }
 
@@ -166,7 +127,6 @@ export default function SoundGallery({ isPremium, userId, name }: Props) {
     stopCurrent();
     if (sound.id === 'rain') playRain(ctx);
     else if (sound.id === 'wind') playWind(ctx);
-    else if (sound.id === 'heartbeat') playHeartbeat(ctx);
     setPlaying(sound.id);
   }
 
@@ -185,7 +145,7 @@ export default function SoundGallery({ isPremium, userId, name }: Props) {
       <div className="sg-list">
         {sounds.map((s) => {
           const Icon = s.icon;
-          const isPlaying = playing === s.id;
+          const isPlaying = s.id === 'heartbeat' ? heartbeat.playing : playing === s.id;
           return (
             <button
               key={s.id}

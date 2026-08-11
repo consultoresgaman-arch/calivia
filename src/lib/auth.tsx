@@ -24,6 +24,10 @@ interface ProfileRow {
   country: string | null;
   is_premium: boolean;
   created_at: string;
+  avatar_path: string | null;
+  phone: string | null;
+  license_number: string | null;
+  bio: string | null;
 }
 
 interface ProfileRowWithSession extends ProfileRow {
@@ -38,6 +42,10 @@ function rowToProfile(row: ProfileRow): Profile {
     country: row.country,
     is_premium: row.is_premium,
     created_at: row.created_at,
+    avatar_path: row.avatar_path,
+    phone: row.phone,
+    license_number: row.license_number,
+    bio: row.bio,
   };
 }
 

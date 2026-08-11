@@ -1,14 +1,42 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, LogOut, Calendar, FileText, Users, UserPlus, UserMinus, AlertTriangle, Check } from 'lucide-react';
+import { BarChart3, LogOut, Calendar, FileText, Users, UserPlus, UserMinus, AlertTriangle, Check, UserCog, NotebookPen, ClipboardList, Flame } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useAuth } from './lib/auth';
-import type { CheckIn, ChatLog, AiReport, Profile, RiskAlert } from './lib/types';
+import { getAvatarSignedUrl } from './lib/avatar';
+import ProfileSettingsModal from './ProfileSettingsModal';
+import type { CheckIn, ChatLog, AiReport, Profile, RiskAlert, ClinicalNote } from './lib/types';
 
 const DISCLAIMER =
   'La interpretación clínica final corresponde siempre al profesional. Este reporte es un apoyo analítico, no un diagnóstico.';
 
 const ALERT_DISCLAIMER =
   'Detección automática por palabras clave, no es una evaluación clínica de riesgo. Úsala como una señal a revisar, no como un diagnóstico.';
+
+const LOW_MOOD_THRESHOLD = 2;
+const LOW_MOOD_STREAK_DAYS = 3;
+const LOW_MOOD_LOOKBACK_DAYS = 10;
+
+// "Prioridad de atención": ¿tuvo este paciente `LOW_MOOD_STREAK_DAYS` días
+// calendario CONSECUTIVOS (no solo 3 sueltos) con ánimo bajo, dentro de la
+// ventana reciente? Mirar todo el historial haría que un mal momento de
+// hace meses siguiera marcado como urgente hoy.
+function hasConsecutiveLowMood(patientCheckins: CheckIn[]): boolean {
+  const cutoff = Date.now() - LOW_MOOD_LOOKBACK_DAYS * 86400000;
+  const lowDates = new Set(
+    patientCheckins
+      .filter((c) => c.mood <= LOW_MOOD_THRESHOLD && new Date(c.created_at).getTime() >= cutoff)
+      .map((c) => c.created_at.slice(0, 10))
+  );
+  if (lowDates.size < LOW_MOOD_STREAK_DAYS) return false;
+  const sorted = Array.from(lowDates).sort();
+  let streak = 1;
+  for (let i = 1; i < sorted.length; i++) {
+    const diffDays = Math.round((new Date(sorted[i]).getTime() - new Date(sorted[i - 1]).getTime()) / 86400000);
+    streak = diffDays === 1 ? streak + 1 : 1;
+    if (streak >= LOW_MOOD_STREAK_DAYS) return true;
+  }
+  return false;
+}
 
 export default function TherapistDashboard() {
   const { profile, signOut } = useAuth();
@@ -24,6 +52,16 @@ export default function TherapistDashboard() {
   const [linkName, setLinkName] = useState('');
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+  const [notes, setNotes] = useState<ClinicalNote[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [newNote, setNewNote] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [assigningTask, setAssigningTask] = useState(false);
+  const [taskAssignedMsg, setTaskAssignedMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -61,6 +99,97 @@ export default function TherapistDashboard() {
   }, [patients]);
 
   const pendingAlerts = useMemo(() => alerts.filter((a) => !a.acknowledged), [alerts]);
+
+  const flaggedPatientIds = useMemo(() => {
+    const flagged = new Set<string>();
+    for (const p of patients) {
+      const own = checkins.filter((c) => c.user_id === p.id);
+      if (hasConsecutiveLowMood(own)) flagged.add(p.id);
+    }
+    return flagged;
+  }, [patients, checkins]);
+
+  const sortedPatients = useMemo(
+    () => [...patients].sort((a, b) => Number(flaggedPatientIds.has(b.id)) - Number(flaggedPatientIds.has(a.id))),
+    [patients, flaggedPatientIds]
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const entries: [string, string][] = [];
+      if (profile?.avatar_path) {
+        const url = await getAvatarSignedUrl(profile.avatar_path);
+        if (url) entries.push([profile.id, url]);
+      }
+      for (const p of patients) {
+        if (!p.avatar_path) continue;
+        const url = await getAvatarSignedUrl(p.avatar_path);
+        if (url) entries.push([p.id, url]);
+      }
+      if (mounted) setAvatarUrls(Object.fromEntries(entries));
+    })();
+    return () => { mounted = false; };
+  }, [profile?.id, profile?.avatar_path, patients]);
+
+  useEffect(() => {
+    if (!selectedPatientId) { setNotes([]); return; }
+    let mounted = true;
+    setNotesLoading(true);
+    (async () => {
+      const { data } = await supabase
+        .from('clinical_notes')
+        .select('*')
+        .eq('patient_id', selectedPatientId)
+        .order('created_at', { ascending: false });
+      if (!mounted) return;
+      setNotes(data ?? []);
+      setNotesLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, [selectedPatientId]);
+
+  function togglePatientPanel(patientId: string) {
+    setNewNote(''); setNewTaskTitle(''); setTaskAssignedMsg(null);
+    setSelectedPatientId((prev) => (prev === patientId ? null : patientId));
+  }
+
+  async function addNote() {
+    const note = newNote.trim();
+    if (!note || !selectedPatientId || !profile || savingNote) return;
+    setSavingNote(true);
+    try {
+      const { data, error } = await supabase
+        .from('clinical_notes')
+        .insert({ patient_id: selectedPatientId, psychologist_id: profile.id, note })
+        .select()
+        .single();
+      if (error) throw error;
+      if (data) setNotes((prev) => [data, ...prev]);
+      setNewNote('');
+    } catch (err) {
+      console.error('addNote failed:', err);
+    } finally {
+      setSavingNote(false);
+    }
+  }
+
+  async function assignTask() {
+    const title = newTaskTitle.trim();
+    if (!title || !selectedPatientId || assigningTask) return;
+    setAssigningTask(true);
+    setTaskAssignedMsg(null);
+    try {
+      const { error } = await supabase.rpc('assign_patient_task', { p_patient_id: selectedPatientId, p_title: title });
+      if (error) throw error;
+      setNewTaskTitle('');
+      setTaskAssignedMsg('Consigna enviada.');
+    } catch (err) {
+      setTaskAssignedMsg(err instanceof Error ? err.message : 'No se pudo asignar');
+    } finally {
+      setAssigningTask(false);
+    }
+  }
 
   async function linkPatient(e: React.FormEvent) {
     e.preventDefault();
@@ -149,8 +278,14 @@ export default function TherapistDashboard() {
             <span className="brand-sub">Panel del especialista</span>
           </div>
           <div className="th-user">
+            <div className="th-avatar small">
+              {avatarUrls[profile?.id ?? ''] ? <img src={avatarUrls[profile!.id]} alt="" /> : (profile?.full_name || '?').charAt(0).toUpperCase()}
+            </div>
             <span className="th-user-name">{profile?.full_name || 'Especialista'}</span>
-            <button className="th-logout" onClick={signOut} type="button" aria-label="Salir">
+            <button className="th-logout" onClick={() => setProfileModalOpen(true)} type="button" aria-label="Editar perfil" title="Editar perfil">
+              <UserCog size={16} strokeWidth={2} />
+            </button>
+            <button className="th-logout" onClick={signOut} type="button" aria-label="Salir" title="Salir">
               <LogOut size={16} strokeWidth={2} />
             </button>
           </div>
@@ -216,22 +351,81 @@ export default function TherapistDashboard() {
               {patients.length === 0 ? (
                 <p className="th-empty-inline">Todavía no tienes pacientes vinculados.</p>
               ) : (
-                patients.map((p) => (
-                  <div key={p.id} className="th-patient-chip">
-                    <div className="th-avatar small">{(p.full_name || '?').charAt(0).toUpperCase()}</div>
-                    <span>{p.full_name}</span>
-                    <button
-                      type="button"
-                      className="th-unlink-btn"
-                      onClick={() => unlinkPatient(p.id)}
-                      aria-label={`Desvincular a ${p.full_name}`}
-                      title="Desvincular"
-                    >
-                      <UserMinus size={14} strokeWidth={2} />
-                    </button>
-                  </div>
-                ))
+                sortedPatients.map((p) => {
+                  const flagged = flaggedPatientIds.has(p.id);
+                  return (
+                    <div key={p.id} className={`th-patient-chip ${flagged ? 'flagged' : ''} ${selectedPatientId === p.id ? 'selected' : ''}`}>
+                      <button type="button" className="th-patient-chip-main" onClick={() => togglePatientPanel(p.id)}>
+                        <div className="th-avatar small">
+                          {avatarUrls[p.id] ? <img src={avatarUrls[p.id]} alt="" /> : (p.full_name || '?').charAt(0).toUpperCase()}
+                        </div>
+                        <span>{p.full_name}</span>
+                        {flagged && <span className="th-flag-badge" title="3 días seguidos de ánimo bajo"><Flame size={11} strokeWidth={2.5} />Prioridad</span>}
+                      </button>
+                      <button
+                        type="button"
+                        className="th-unlink-btn"
+                        onClick={() => unlinkPatient(p.id)}
+                        aria-label={`Desvincular a ${p.full_name}`}
+                        title="Desvincular"
+                      >
+                        <UserMinus size={14} strokeWidth={2} />
+                      </button>
+                    </div>
+                  );
+                })
               )}
+            </div>
+          )}
+
+          {selectedPatientId && (
+            <div className="th-patient-panel">
+              <div className="th-panel-col">
+                <h4><NotebookPen size={14} strokeWidth={2} /> Notas clínicas</h4>
+                <p className="th-panel-hint">Privadas — solo tú las ves. El paciente nunca tiene acceso a esto.</p>
+                <div className="th-notes-list">
+                  {notesLoading ? (
+                    <p className="th-empty-inline">Cargando notas…</p>
+                  ) : notes.length === 0 ? (
+                    <p className="th-empty-inline">Sin notas todavía.</p>
+                  ) : (
+                    notes.map((n) => (
+                      <div key={n.id} className="th-note-item">
+                        <p>{n.note}</p>
+                        <span>{new Date(n.created_at).toLocaleString('es-CL')}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="th-note-form">
+                  <textarea
+                    value={newNote}
+                    onChange={(e) => setNewNote(e.target.value)}
+                    placeholder="Impresiones de la consulta…"
+                    rows={3}
+                  />
+                  <button type="button" className="th-btn-primary" onClick={addNote} disabled={savingNote || !newNote.trim()}>
+                    {savingNote ? 'Guardando…' : 'Agregar nota'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="th-panel-col">
+                <h4><ClipboardList size={14} strokeWidth={2} /> Asignar consigna</h4>
+                <p className="th-panel-hint">Una pregunta o tarea breve que le aparecerá en sus tareas.</p>
+                <div className="th-note-form">
+                  <input
+                    type="text"
+                    value={newTaskTitle}
+                    onChange={(e) => setNewTaskTitle(e.target.value)}
+                    placeholder="Ej. ¿Qué momento del día fue más liviano hoy?"
+                  />
+                  <button type="button" className="th-btn-primary" onClick={assignTask} disabled={assigningTask || !newTaskTitle.trim()}>
+                    {assigningTask ? 'Enviando…' : 'Asignar'}
+                  </button>
+                </div>
+                {taskAssignedMsg && <p className="th-task-msg">{taskAssignedMsg}</p>}
+              </div>
             </div>
           )}
         </section>
@@ -344,10 +538,30 @@ export default function TherapistDashboard() {
           .th-link-error { margin: 0; padding: 0 20px 8px; font-size: 13px; color: var(--danger); }
           .th-patient-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px 20px; }
           .th-empty-inline { margin: 0; font-size: 13px; color: var(--text-soft); }
-          .th-patient-chip { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 13px; font-weight: 600; color: var(--text); }
+          .th-patient-chip { display: flex; align-items: center; gap: 4px; padding: 6px 8px 6px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 13px; font-weight: 600; color: var(--text); }
+          .th-patient-chip.flagged { border-color: rgba(196,91,74,0.35); background: var(--danger-bg); }
+          .th-patient-chip.selected { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(112,130,56,0.15); }
+          .th-patient-chip-main { display: flex; align-items: center; gap: 8px; border: none; background: transparent; cursor: pointer; padding: 0; font: inherit; color: inherit; }
+          .th-flag-badge { display: flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; }
           .th-avatar.small { width: 26px; height: 26px; font-size: 12px; }
-          .th-unlink-btn { border: none; background: transparent; color: var(--text-muted); cursor: pointer; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; transition: background 0.15s, color 0.15s; }
+          .th-avatar { overflow: hidden; }
+          .th-avatar img { width: 100%; height: 100%; object-fit: cover; }
+          .th-unlink-btn { border: none; background: transparent; color: var(--text-muted); cursor: pointer; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; transition: background 0.15s, color 0.15s; flex-shrink: 0; }
           .th-unlink-btn:hover { background: var(--danger-bg); color: var(--danger); }
+
+          .th-patient-panel { display: grid; grid-template-columns: 1fr; gap: 20px; padding: 4px 20px 22px; border-top: 1px solid var(--border-soft); margin-top: 4px; }
+          @media (min-width: 720px) { .th-patient-panel { grid-template-columns: 1fr 1fr; } }
+          .th-panel-col { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; }
+          .th-panel-col h4 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13.5px; font-weight: 700; color: var(--text); }
+          .th-panel-hint { margin: 0; font-size: 11.5px; color: var(--text-soft); }
+          .th-notes-list { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; }
+          .th-note-item { padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--surface-2); }
+          .th-note-item p { margin: 0 0 4px; font-size: 13px; color: var(--text); white-space: pre-wrap; }
+          .th-note-item span { font-size: 10.5px; color: var(--text-muted); }
+          .th-note-form { display: flex; flex-direction: column; gap: 8px; }
+          .th-note-form textarea, .th-note-form input { font: inherit; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); resize: vertical; }
+          .th-note-form textarea:focus, .th-note-form input:focus { border-color: var(--primary); outline: none; }
+          .th-task-msg { margin: 0; font-size: 12.5px; color: var(--primary-600); font-weight: 600; }
 
           .th-alerts-card { border-color: rgba(196,91,74,0.3); }
           .th-section-head.alert { border-bottom-color: rgba(196,91,74,0.15); }
@@ -384,6 +598,7 @@ export default function TherapistDashboard() {
           .th-disclaimer { font-size: 11px; color: var(--text-soft); line-height: 1.5; padding-top: 10px; border-top: 1px solid var(--border-soft); font-style: italic; }
         `}</style>
       </main>
+      <ProfileSettingsModal open={profileModalOpen} onClose={() => setProfileModalOpen(false)} />
     </>
   );
 }

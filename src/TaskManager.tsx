@@ -165,7 +165,10 @@ export default function TaskManager({ userId }: Props) {
                 </button>
                 <div className="tk-body">
                   <span className="tk-title">{t.title}</span>
-                  {t.due_at && <span className="tk-due">{formatDue(t.due_at)}</span>}
+                  <div className="tk-meta">
+                    {t.due_at && <span className="tk-due">{formatDue(t.due_at)}</span>}
+                    {t.assigned_by && <span className="tk-assigned-badge">De tu especialista</span>}
+                  </div>
                 </div>
                 <button className="tk-delete" onClick={() => removeTask(t.id)} type="button" aria-label="Eliminar">
                   <Trash2 size={15} strokeWidth={2} />
@@ -225,8 +228,10 @@ export default function TaskManager({ userId }: Props) {
         .tk-body { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
         .tk-title { font-size: 14px; font-weight: 600; color: var(--text); }
         .tk-item.done .tk-title { text-decoration: line-through; }
+        .tk-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .tk-due { font-size: 12px; color: var(--text-soft); font-weight: 500; }
         .tk-item.overdue .tk-due { color: var(--warn); font-weight: 700; }
+        .tk-assigned-badge { padding: 2px 8px; border-radius: 999px; background: rgba(112,130,56,0.12); color: var(--primary-600); font-size: 10.5px; font-weight: 700; }
         .tk-delete { border: none; background: transparent; color: var(--text-muted); cursor: pointer; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; flex-shrink: 0; transition: background 0.15s, color 0.15s; }
         .tk-delete:hover { background: var(--danger-bg); color: var(--danger); }
         .tk-divider { display: flex; align-items: center; gap: 12px; padding: 6px 0 0; color: var(--text-muted); font-size: 12px; font-weight: 500; }

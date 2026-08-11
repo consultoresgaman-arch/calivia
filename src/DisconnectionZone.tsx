@@ -312,6 +312,7 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
   const spawnedInRoundRef = useRef(0);
   const resolvedInRoundRef = useRef(0);
   const melodyIndexRef = useRef(0);
+  const previewingRef = useRef(false);
 
   const [ripples, setRipples] = useState<Ripple[]>([]);
   const [tracePoints, setTracePoints] = useState<TracePoint[]>([]);
@@ -418,11 +419,24 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
     return idx;
   }
 
+  // Adelanto: al empezar cada ronda (o cuando arranca una melodía nueva),
+  // suena la secuencia completa una vez, nota por nota, antes de que
+  // empiecen a caer las gotas de esa ronda.
+  function playMelodyPreview(seq: number[]) {
+    previewingRef.current = true;
+    const noteGap = 340;
+    seq.forEach((freq, i) => {
+      setTimeout(() => playChime(freq), i * noteGap);
+    });
+    setTimeout(() => { previewingRef.current = false; }, seq.length * noteGap + 200);
+  }
+
   function startMelodyRound(pickNew: boolean) {
     if (pickNew) melodyIndexRef.current = pickNextMelodyIndex(melodyIndexRef.current);
     spawnedInRoundRef.current = 0;
     resolvedInRoundRef.current = 0;
     setMelodyDone(false);
+    playMelodyPreview(MELODIES[melodyIndexRef.current]);
   }
 
   function resolveNote() {
@@ -441,6 +455,7 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
     melodyIndexRef.current = Math.floor(Math.random() * MELODIES.length);
     startMelodyRound(false);
     function spawn() {
+      if (previewingRef.current) return;
       setDrops((prev) => {
         const active = prev.filter((d) => !d.popped);
         if (active.length >= MAX_DROPS) return prev;

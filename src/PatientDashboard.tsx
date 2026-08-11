@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, CalendarClock, CloudRain, NotebookPen } from 'lucide-react';
+import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, CalendarClock, CloudRain, NotebookPen, UserCog, HeartPulse } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useAuth } from './lib/auth';
+import { getAvatarSignedUrl } from './lib/avatar';
+import { useHeartbeatSound } from './lib/useHeartbeatSound';
 import AiChat from './AiChat';
 import FreemiumBanner from './FreemiumBanner';
 import SosModal from './SosModal';
@@ -13,6 +15,8 @@ import SoundGallery from './SoundGallery';
 import QuickCheckIn from './QuickCheckIn';
 import JournalSpace from './JournalSpace';
 import MicroPause from './MicroPause';
+import DailySpark from './DailySpark';
+import ProfileSettingsModal from './ProfileSettingsModal';
 
 const MAX_FREE_MESSAGES = 20;
 
@@ -35,9 +39,18 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const [recoveryEmailMsg, setRecoveryEmailMsg] = useState<string | null>(null);
   const [showCheckIn, setShowCheckIn] = useState(true);
   const [sosInitialGrounding, setSosInitialGrounding] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const isPremium = !!profile?.is_premium;
   const maxFree = isPremium ? Infinity : MAX_FREE_MESSAGES;
+  const calmSpace = useHeartbeatSound();
+
+  useEffect(() => {
+    let mounted = true;
+    getAvatarSignedUrl(profile?.avatar_path).then((url) => { if (mounted) setAvatarUrl(url); });
+    return () => { mounted = false; };
+  }, [profile?.avatar_path]);
 
   useEffect(() => {
     let mounted = true;
@@ -94,12 +107,17 @@ export default function PatientDashboard({ onExitToHome }: Props) {
               <span className="hdr-btn-label">Agendar</span>
             </button>
             <div className="user-chip" onClick={() => setMenuOpen((o) => !o)}>
-              <div className="user-avatar">{(profile?.full_name || '?').charAt(0).toUpperCase()}</div>
+              <div className="user-avatar">
+                {avatarUrl ? <img src={avatarUrl} alt="" /> : (profile?.full_name || '?').charAt(0).toUpperCase()}
+              </div>
               {menuOpen && (
                 <div className="user-menu anim-pop" onClick={(e) => e.stopPropagation()}>
                   <div className="user-menu-info">
                     <div className="user-menu-name">{profile?.full_name || 'Usuario'}</div>
                   </div>
+                  <button className="user-menu-edit-profile" onClick={() => { setMenuOpen(false); setProfileModalOpen(true); }} type="button">
+                    <UserCog size={16} strokeWidth={2} /><span>Editar perfil</span>
+                  </button>
                   <form className="user-menu-recovery" onSubmit={saveRecoveryEmail}>
                     <span>Correo de recuperación</span>
                     <p>Solo para recuperar tu contraseña si la olvidas. Nunca se usa para entrar.</p>
@@ -130,6 +148,8 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         {section === 'chat' && showCheckIn && (
           <QuickCheckIn userId={profile!.id} onDismiss={() => setShowCheckIn(false)} />
         )}
+
+        {section === 'chat' && <DailySpark />}
 
         {section === 'chat' && !isPremium && (
           <FreemiumBanner
@@ -230,6 +250,9 @@ export default function PatientDashboard({ onExitToHome }: Props) {
       <MicroPause />
 
       <div className="sos-dock">
+        <button className={`calm-fab ${calmSpace.playing ? 'active' : ''}`} onClick={calmSpace.toggle} type="button">
+          <HeartPulse size={20} strokeWidth={2} /><span>Espacio de Calma</span>
+        </button>
         <button className="sos-fab" onClick={() => setSosOpen(true)} type="button">
           <Wind size={20} strokeWidth={2} /><span>Respiro urgente</span>
         </button>
@@ -254,6 +277,10 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         userId={profile!.id}
         name={profile?.full_name}
       />
+      <ProfileSettingsModal
+        open={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+      />
 
       <style>{`
         .app-header { position: sticky; top: 0; z-index: 40; background: rgba(26,29,26,0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.08); }
@@ -273,7 +300,10 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         .hdr-btn-label { display: none; }
         @media (min-width: 420px) { .hdr-btn-label { display: inline; } }
         .user-chip { position: relative; cursor: pointer; }
-        .user-avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--secondary-200), var(--secondary)); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px; }
+        .user-avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--secondary-200), var(--secondary)); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px; overflow: hidden; }
+        .user-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .user-menu-edit-profile { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; margin-bottom: 8px; border: none; background: var(--surface-2); color: var(--text-soft); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .user-menu-edit-profile:hover { background: var(--muted); color: var(--text); }
         .user-menu { position: absolute; top: 40px; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 14px; min-width: 240px; max-width: 280px; z-index: 50; }
         .user-menu-info { padding-bottom: 10px; border-bottom: 1px solid var(--border-soft); margin-bottom: 10px; }
         .user-menu-name { font-size: 14px; font-weight: 700; }
@@ -318,10 +348,14 @@ export default function PatientDashboard({ onExitToHome }: Props) {
 
         .progress-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; }
 
-        .sos-dock { position: fixed; bottom: 0; left: 0; right: 0; padding: 12px 20px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, var(--bg) 30%); z-index: 30; display: flex; justify-content: center; }
+        .sos-dock { position: fixed; bottom: 0; left: 0; right: 0; padding: 12px 20px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, var(--bg) 30%); z-index: 30; display: flex; flex-direction: column; align-items: center; gap: 8px; }
         .sos-fab { display: flex; align-items: center; gap: 8px; padding: 14px 28px; border: none; border-radius: 999px; background: var(--secondary); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 20px rgba(140,138,126,0.25); transition: transform 0.12s; max-width: 320px; width: 100%; justify-content: center; }
         .sos-fab:hover { transform: translateY(-2px); }
         .sos-fab:active { transform: scale(0.97); }
+        .calm-fab { display: flex; align-items: center; gap: 8px; padding: 10px 24px; border: 1px solid var(--primary-200); border-radius: 999px; background: var(--surface); color: var(--primary-600); font-size: 13.5px; font-weight: 700; cursor: pointer; transition: transform 0.12s, background 0.15s; max-width: 320px; width: 100%; justify-content: center; }
+        .calm-fab.active { background: rgba(112,130,56,0.12); }
+        .calm-fab:hover { transform: translateY(-1px); }
+        .calm-fab:active { transform: scale(0.97); }
       `}</style>
     </>
   );

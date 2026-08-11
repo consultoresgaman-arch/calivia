@@ -7,6 +7,18 @@ export interface Profile {
   country: string | null;
   is_premium: boolean;
   created_at: string;
+  avatar_path: string | null;
+  phone: string | null;
+  license_number: string | null;
+  bio: string | null;
+}
+
+export interface ClinicalNote {
+  id: string;
+  patient_id: string;
+  psychologist_id: string;
+  note: string;
+  created_at: string;
 }
 
 export interface CheckIn {
@@ -42,6 +54,7 @@ export interface TaskItem {
   due_at: string | null;
   done: boolean;
   created_at: string;
+  assigned_by: string | null;
 }
 
 export interface AiReport {

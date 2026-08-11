@@ -33,6 +33,11 @@ export default function WeeklyProgress({ userId }: Props) {
   const [activeDay, setActiveDay] = useState<number | null>(null);
 
   const weekStart = useMemo(() => startOfWeek(new Date()), []);
+  const historyStart = useMemo(() => {
+    const d = startOfWeek(new Date());
+    d.setDate(d.getDate() - 7 * 7); // 7 semanas antes de la actual = 8 semanas en total
+    return d;
+  }, []);
   const todayKey = localDateKey(new Date());
   const isSunday = new Date().getDay() === 0;
 
@@ -43,14 +48,14 @@ export default function WeeklyProgress({ userId }: Props) {
         .from('checkins')
         .select('*')
         .eq('user_id', userId)
-        .gte('created_at', weekStart.toISOString())
+        .gte('created_at', historyStart.toISOString())
         .order('created_at', { ascending: true });
       if (!mounted) return;
       setCheckins(data ?? []);
       setLoading(false);
     })();
     return () => { mounted = false; };
-  }, [userId, weekStart]);
+  }, [userId, historyStart]);
 
   const moodByDay = useMemo(() => {
     const map = new Map<string, number>();
@@ -66,6 +71,27 @@ export default function WeeklyProgress({ userId }: Props) {
   }), [weekStart, moodByDay, todayKey]);
 
   const todayMood = moodByDay.get(todayKey) ?? null;
+
+  const weeklyHistory = useMemo(() => {
+    const sums = new Map<string, { total: number; count: number; start: Date }>();
+    for (const c of checkins) {
+      const start = startOfWeek(new Date(c.created_at));
+      const key = localDateKey(start);
+      const bucket = sums.get(key) ?? { total: 0, count: 0, start };
+      bucket.total += c.mood;
+      bucket.count += 1;
+      sums.set(key, bucket);
+    }
+    return Array.from({ length: 8 }, (_, i) => {
+      const start = new Date(historyStart);
+      start.setDate(start.getDate() + i * 7);
+      const key = localDateKey(start);
+      const bucket = sums.get(key);
+      const avg = bucket ? bucket.total / bucket.count : null;
+      const label = `${start.getDate()}/${start.getMonth() + 1}`;
+      return { key, label, avg, isCurrent: key === localDateKey(weekStart) };
+    });
+  }, [checkins, historyStart, weekStart]);
 
   async function logMood(mood: number) {
     if (saving) return;
@@ -145,6 +171,27 @@ export default function WeeklyProgress({ userId }: Props) {
         </div>
       )}
 
+      {!loading && (
+        <div className="wp-history">
+          <h3>Últimas 8 semanas</h3>
+          <div className="wp-history-chart" role="img" aria-label="Tendencia de ánimo promedio de las últimas 8 semanas">
+            {weeklyHistory.map((w) => {
+              const hasData = w.avg !== null;
+              const pct = hasData ? Math.max(10, (w.avg! / 5) * 100) : 6;
+              const color = hasData ? MOOD_COLOR[Math.round(w.avg!)] : 'var(--border)';
+              return (
+                <div key={w.key} className="wp-history-col">
+                  <div className="wp-history-bar-wrap">
+                    <span className={`wp-history-bar ${hasData ? '' : 'empty'}`} style={{ height: `${pct}%`, background: color }} />
+                  </div>
+                  <span className={`wp-history-label ${w.isCurrent ? 'current' : ''}`}>{w.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <style>{`
         .wp-card { display: flex; flex-direction: column; gap: 16px; }
         .wp-head { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--border-soft); }
@@ -179,6 +226,16 @@ export default function WeeklyProgress({ userId }: Props) {
           background: var(--text); color: var(--surface); font-size: 11px; font-weight: 600;
           white-space: nowrap; z-index: 2; animation: fadeIn 0.15s ease;
         }
+
+        .wp-history { display: flex; flex-direction: column; gap: 10px; padding-top: 6px; border-top: 1px solid var(--border-soft); }
+        .wp-history h3 { margin: 0; font-size: 13px; font-weight: 700; color: var(--text-soft); }
+        .wp-history-chart { display: flex; align-items: flex-end; justify-content: space-between; gap: 5px; height: 70px; padding-top: 8px; }
+        .wp-history-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; }
+        .wp-history-bar-wrap { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+        .wp-history-bar { width: 12px; border-radius: 3px 3px 0 0; transition: height 0.4s ease; }
+        .wp-history-bar.empty { border: 1px dashed var(--border); background: transparent !important; }
+        .wp-history-label { font-size: 9.5px; font-weight: 600; color: var(--text-muted); }
+        .wp-history-label.current { color: var(--primary-600); }
       `}</style>
     </section>
   );
