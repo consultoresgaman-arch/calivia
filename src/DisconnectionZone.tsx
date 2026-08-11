@@ -59,49 +59,112 @@ interface StoryChoice {
   reply: string;
 }
 
-interface StoryStep {
+interface ChoiceStep {
+  kind: 'choice';
   prompt: string;
-  choices: StoryChoice[];
+  choices: [StoryChoice, StoryChoice];
 }
+
+// Variante de mecánica: en vez de elegir entre dos frases, un gesto simple
+// y sin presión (mantener presionado). No hay fallo ni cronómetro visible —
+// soltar antes de tiempo solo reinicia el gesto, se puede reintentar las
+// veces que haga falta.
+interface HoldStep {
+  kind: 'hold';
+  prompt: string;
+  holdLabel: string;
+  tag: string;
+  reply: string;
+}
+
+type StoryStep = ChoiceStep | HoldStep;
 
 interface StoryEnding {
   title: string;
   body: string;
 }
 
-// "El Ascenso" (La Travesía de la Vida): cuatro obstáculos cotidianos, cada
-// uno con dos formas igual de válidas de seguir adelante (seguir con
-// constancia o tomarse una pausa). Ninguna elección es un error ni corta el
-// camino — todas llevan a la cima, solo que por rutas distintas.
-const ASCENT_STEPS: StoryStep[] = [
-  {
-    prompt: 'El camino empieza empinado. Ni siquiera has dado el primer paso y ya sientes el peso de la subida.',
-    choices: [
+function choiceStep(prompt: string, a: StoryChoice, b: StoryChoice): ChoiceStep {
+  return { kind: 'choice', prompt, choices: [a, b] };
+}
+
+// Bancos de variantes por "momento" del recorrido: cada partida elige al
+// azar una variante distinta por momento (y evita repetir la de la partida
+// anterior), así que el texto y, a veces, hasta la mecánica cambian entre
+// una jugada y la siguiente.
+
+// "El Ascenso" (La Travesía de la Vida): cuatro momentos, cada uno con
+// varias formas igual de válidas de seguir adelante (constancia o pausa).
+// Ninguna elección es un error ni corta el camino — todas llevan a la cima.
+const ASCENT_BANK: StoryStep[][] = [
+  // Momento 1: el arranque
+  [
+    choiceStep(
+      'El camino empieza empinado. Ni siquiera has dado el primer paso y ya sientes el peso de la subida.',
       { label: 'Doy el primer paso, aunque sea lento', tag: 'constancia', reply: 'Avanzas despacio, pero avanzas. El camino empieza a moverse contigo.' },
       { label: 'Me quedo un momento mirando la cima', tag: 'pausa', reply: 'Te tomas un segundo para mirar hacia arriba. No es rendirte, es tomar aire antes de empezar.' },
-    ],
-  },
-  {
-    prompt: 'A mitad de camino, una duda te alcanza: "¿y si esto no vale la pena?".',
-    choices: [
+    ),
+    choiceStep(
+      'Frente a ti hay una cuesta de tierra suelta, del tipo que resbala si no calculas bien el paso.',
+      { label: 'Piso firme y avanzo, cuidando cada paso', tag: 'constancia', reply: 'Encuentras un ritmo cuidadoso, paso a paso, sin resbalar.' },
+      { label: 'Busco primero con la vista por dónde es menos resbaloso', tag: 'pausa', reply: 'Te tomas un momento para leer el terreno antes de moverte. Ese momento también cuenta.' },
+    ),
+    choiceStep(
+      'No hay nadie más en este camino. Solo tú, la cuesta, y las ganas —o la falta de ellas— de empezar.',
+      { label: 'Empiezo aunque las ganas no estén del todo', tag: 'constancia', reply: 'No esperas a tener ganas completas. Simplemente empiezas, y eso ya mueve algo.' },
+      { label: 'Me quedo un momento con la falta de ganas, sin pelear con ella', tag: 'pausa', reply: 'Te sientas con esa falta de ganas un rato, sin exigirte sentir otra cosa todavía.' },
+    ),
+  ],
+  // Momento 2: la duda
+  [
+    choiceStep(
+      'A mitad de camino, una duda te alcanza: "¿y si esto no vale la pena?".',
       { label: 'Sigo caminando con la duda a cuestas', tag: 'constancia', reply: 'La duda no desaparece, pero tampoco te detiene. Caminas con ella, no contra ella.' },
       { label: 'Me siento un rato a dejar que la duda hable', tag: 'pausa', reply: 'Te sientas junto a la duda un momento. A veces escucharla es lo que la hace más pequeña.' },
-    ],
-  },
-  {
-    prompt: 'Las piernas pesan. El cansancio ya no es una idea, es real.',
-    choices: [
+    ),
+    choiceStep(
+      'Una voz conocida —quizás la tuya, quizás la de alguien más— te dice que no vas a lograrlo.',
+      { label: 'Sigo caminando, la voz puede seguir hablando', tag: 'constancia', reply: 'Dejas que la voz hable de fondo, sin obedecerla. Sigues moviendo los pies.' },
+      { label: 'Me detengo a mirar de frente esa voz', tag: 'pausa', reply: 'Te giras a mirarla de frente un momento. A veces perder el miedo a verla la hace menos grande.' },
+    ),
+    { kind: 'hold', prompt: 'El peso de la duda pesa más que el camino mismo. Antes de seguir, date un segundo real.', holdLabel: 'Mantén el dedo aquí mientras respiras', tag: 'presencia', reply: 'Te diste ese segundo. Nadie te lo quitó, y el camino te esperó ahí, quieto.' },
+  ],
+  // Momento 3: el cansancio
+  [
+    choiceStep(
+      'Las piernas pesan. El cansancio ya no es una idea, es real.',
       { label: 'Aprieto el paso un poco más', tag: 'constancia', reply: 'El cuerpo protesta, pero responde. Un paso, y otro, y otro.' },
       { label: 'Bajo el ritmo, sin dejar de moverme', tag: 'pausa', reply: 'Bajas el ritmo sin detenerte del todo. El cansancio deja de ser un enemigo y pasa a ser solo parte del camino.' },
-    ],
-  },
-  {
-    prompt: 'Ves la cima, más cerca que nunca, justo cuando menos fuerza sientes tener.',
-    choices: [
+    ),
+    choiceStep(
+      'El sol pega distinto ahora. Sientes la garganta seca y las ideas más lentas.',
+      { label: 'Sigo, el cuerpo aguanta más de lo que creo', tag: 'constancia', reply: 'Sigues, y el cuerpo —a su manera terca— responde.' },
+      { label: 'Busco sombra un momento antes de seguir', tag: 'pausa', reply: 'Encuentras un poco de sombra y te quedas ahí un momento. El camino no se mueve, sigue esperándote.' },
+    ),
+    choiceStep(
+      'Alguien que ya bajaba te dice que falta mucho todavía. No sabes si creerle.',
+      { label: 'Sigo mi propio paso, falte lo que falte', tag: 'constancia', reply: 'Decides que tu paso es tuyo, sin importar cuánto diga que falta.' },
+      { label: 'Agradezco el aviso y me tomo un respiro con esa información', tag: 'pausa', reply: 'Te tomas un respiro con esa nueva información, sin que te apure ni te frene del todo.' },
+    ),
+  ],
+  // Momento 4: el tramo final
+  [
+    choiceStep(
+      'Ves la cima, más cerca que nunca, justo cuando menos fuerza sientes tener.',
       { label: 'Uso lo poco que me queda para llegar', tag: 'constancia', reply: 'Con lo último que te queda, das los pasos finales.' },
       { label: 'Respiro hondo antes del último tramo', tag: 'pausa', reply: 'Una última respiración, profunda, antes del tramo final.' },
-    ],
-  },
+    ),
+    choiceStep(
+      'El viento cambia justo antes del final, como si el camino también estuviera despidiéndose de la subida.',
+      { label: 'Aprovecho el envión y termino de subir', tag: 'constancia', reply: 'El viento casi te empuja. Aprovechas ese envión hasta arriba.' },
+      { label: 'Dejo que el viento me alcance antes de dar el paso final', tag: 'pausa', reply: 'Te quedas un instante sintiendo el viento antes del último paso.' },
+    ),
+    choiceStep(
+      'Ya casi. Lo que sea que te trajo hasta aquí sigue contigo, un paso más.',
+      { label: 'Doy ese último paso con todo lo que me trajo hasta aquí', tag: 'constancia', reply: 'Das el último paso con todo lo que te trajo hasta aquí, sin dejar nada atrás.' },
+      { label: 'Miro atrás un segundo todo lo recorrido, antes del último paso', tag: 'pausa', reply: 'Miras atrás un instante — todo lo recorrido — antes de dar el paso final.' },
+    ),
+  ],
 ];
 
 function buildAscentEnding(picks: string[]): StoryEnding {
@@ -124,28 +187,52 @@ function buildAscentEnding(picks: string[]): StoryEnding {
 // "El Equilibrio Interior" (El Desafío de las Decisiones Clave): un dilema
 // personal resuelto en tres momentos, alternando entre mirar hacia adentro
 // (reflexión) y confiar en lo que ya se sabe de uno mismo (instinto).
-const BALANCE_STEPS: StoryStep[] = [
-  {
-    prompt: 'Tienes en la cabeza una decisión importante pendiente, y sientes la presión de resolverla ya.',
-    choices: [
+const BALANCE_BANK: StoryStep[][] = [
+  // Momento 1: la presión inicial
+  [
+    choiceStep(
+      'Tienes en la cabeza una decisión importante pendiente, y sientes la presión de resolverla ya.',
       { label: 'Analizo cada opción con calma', tag: 'reflexion', reply: 'Te tomas el tiempo de mirar la decisión desde varios ángulos, sin apurarte a cerrar el tema.' },
       { label: 'Sigo lo que mi instinto ya me dice', tag: 'instinto', reply: 'Confías en esa primera respuesta que ya tenías, la que apareció antes de pensar demasiado.' },
-    ],
-  },
-  {
-    prompt: 'Notas que parte de la presión no viene de la decisión en sí, sino de lo que otros podrían pensar de tu elección.',
-    choices: [
+    ),
+    choiceStep(
+      'El reloj no dice nada, pero tú sientes que ya debería estar resuelto esto.',
+      { label: 'Suelto la idea de que debía estar resuelto ya', tag: 'reflexion', reply: 'Sueltas esa exigencia de horario que nadie más te puso. La decisión sigue su propio tiempo.' },
+      { label: 'Reviso qué fue lo primero que se me ocurrió, sin filtrarlo', tag: 'instinto', reply: 'Vuelves a esa primera idea, la más cruda, antes de que la razón la complique.' },
+    ),
+    { kind: 'hold', prompt: 'Antes de seguir pensando la decisión, date una pausa real, no solo mental.', holdLabel: 'Sostén mientras sueltas el aire', tag: 'presencia', reply: 'Ese aire que soltaste se llevó algo de la urgencia. La decisión sigue ahí, pero un poco más liviana.' },
+  ],
+  // Momento 2: la presión externa
+  [
+    choiceStep(
+      'Notas que parte de la presión no viene de la decisión en sí, sino de lo que otros podrían pensar de tu elección.',
       { label: 'Me pregunto qué es lo que yo realmente quiero', tag: 'reflexion', reply: 'Apartas por un momento las voces externas y te haces la pregunta que importa: ¿qué quieres tú?' },
       { label: 'Reconozco esa presión y decido igual', tag: 'instinto', reply: 'Ves la presión con claridad, la nombras, y decides sin dejar que sea ella quien elija por ti.' },
-    ],
-  },
-  {
-    prompt: 'Llega el momento de decidir. Ya no hay más información nueva que esperar.',
-    choices: [
+    ),
+    choiceStep(
+      'Te das cuenta de que ya casi puedes anticipar lo que dirían ciertas personas si te vieran elegir.',
+      { label: 'Reconozco esas voces y las dejo del lado de afuera', tag: 'reflexion', reply: 'Nombras esas voces anticipadas y las dejas fuera del círculo de esta decisión.' },
+      { label: 'Elijo de todos modos, esas voces no están aquí realmente', tag: 'instinto', reply: 'Recuerdas que esas voces no están realmente en la sala. Decides con quien sí está: tú.' },
+    ),
+  ],
+  // Momento 3: la decisión final
+  [
+    choiceStep(
+      'Llega el momento de decidir. Ya no hay más información nueva que esperar.',
       { label: 'Elijo la opción que más se alinea con lo que soy', tag: 'reflexion', reply: 'Eliges desde quién eres, no desde el miedo a equivocarte.' },
       { label: 'Elijo y confío en poder ajustar el rumbo después', tag: 'instinto', reply: 'Eliges sabiendo que ninguna decisión es definitiva del todo — siempre se puede ajustar el rumbo.' },
-    ],
-  },
+    ),
+    choiceStep(
+      'No hay una señal externa que te confirme que es el momento. Tendrás que confiar en que sí lo es.',
+      { label: 'Confío en el proceso que hice para llegar hasta aquí', tag: 'reflexion', reply: 'Confías en el camino que ya recorriste para llegar a este punto, no solo en el resultado.' },
+      { label: 'Confío en que, si algo estuviera mal, ya lo sentiría distinto', tag: 'instinto', reply: 'Confías en esa sensación de fondo — la que no cambió en todo este tiempo.' },
+    ),
+    choiceStep(
+      'Sientes que postergar un poco más no te va a dar más claridad, solo más cansancio.',
+      { label: 'Decido ahora, apoyándome en lo que ya reflexioné', tag: 'reflexion', reply: 'Decides ahora, apoyada en todo lo que ya pensaste, no en información nueva que no iba a llegar.' },
+      { label: 'Decido ahora, sin darle más vueltas', tag: 'instinto', reply: 'Cortas la vuelta extra. La decisión ya estaba tomada hace rato, solo hacía falta decirlo.' },
+    ),
+  ],
 ];
 
 function buildBalanceEnding(picks: string[]): StoryEnding {
@@ -165,11 +252,27 @@ function buildBalanceEnding(picks: string[]): StoryEnding {
   };
 }
 
-const STORY_STEPS: Record<'ascent' | 'balance', StoryStep[]> = { ascent: ASCENT_STEPS, balance: BALANCE_STEPS };
+const STORY_BANKS: Record<'ascent' | 'balance', StoryStep[][]> = { ascent: ASCENT_BANK, balance: BALANCE_BANK };
 const STORY_ENDING_BUILDERS: Record<'ascent' | 'balance', (picks: string[]) => StoryEnding> = {
   ascent: buildAscentEnding,
   balance: buildBalanceEnding,
 };
+
+// Arma una partida nueva escogiendo, para cada momento, una variante al azar
+// entre su banco — evitando repetir la variante usada la última vez en ese
+// mismo momento, para que un reinicio inmediato ya se sienta distinto.
+function drawStorySteps(game: 'ascent' | 'balance', lastVariants: number[]): { steps: StoryStep[]; variants: number[] } {
+  const bank = STORY_BANKS[game];
+  const variants: number[] = [];
+  const steps = bank.map((slot, i) => {
+    const avoid = lastVariants[i];
+    const candidates = slot.length > 1 ? slot.map((_, idx) => idx).filter((idx) => idx !== avoid) : [0];
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    variants.push(chosen);
+    return slot[chosen];
+  });
+  return { steps, variants };
+}
 
 const SPHERE_COLORS = ['#A8B87E', '#8FAF6B', '#C9A66B', '#B08BC0', '#6FA8B8'];
 const PAIR_COUNT = 4;
@@ -216,10 +319,14 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
   const [particles, setParticles] = useState<Particle[]>([]);
   const nextParticleId = useRef(0);
 
+  const [storySteps, setStorySteps] = useState<StoryStep[]>([]);
   const [storyIndex, setStoryIndex] = useState(0);
   const [storyLog, setStoryLog] = useState<string[]>([]);
   const [storyPicks, setStoryPicks] = useState<string[]>([]);
   const [storyEnding, setStoryEnding] = useState<StoryEnding | null>(null);
+  const [holding, setHolding] = useState(false);
+  const lastAscentVariants = useRef<number[]>([]);
+  const lastBalanceVariants = useRef<number[]>([]);
 
   const audioRef = useRef<AudioContext | null>(null);
   const nextSphereId = useRef(0);
@@ -400,28 +507,45 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
     return () => clearInterval(interval);
   }, [open, game]);
 
-  // Story games (ascent / balance): se reinician al abrir o al cambiar de juego.
+  // Story games (ascent / balance): cada apertura o reinicio arma una
+  // partida nueva escogiendo variantes al azar de cada banco.
+  function newStoryGame(g: 'ascent' | 'balance') {
+    const lastRef = g === 'ascent' ? lastAscentVariants : lastBalanceVariants;
+    const { steps, variants } = drawStorySteps(g, lastRef.current);
+    lastRef.current = variants;
+    setStorySteps(steps);
+    setStoryIndex(0); setStoryLog([]); setStoryPicks([]); setStoryEnding(null); setHolding(false);
+  }
+
   useEffect(() => {
     if (!open || (game !== 'ascent' && game !== 'balance')) return;
-    setStoryIndex(0); setStoryLog([]); setStoryPicks([]); setStoryEnding(null);
+    newStoryGame(game);
   }, [open, game]);
 
-  function chooseStoryOption(choice: StoryChoice) {
+  function advanceStory(tag: string, reply: string) {
     if (game !== 'ascent' && game !== 'balance') return;
-    const steps = STORY_STEPS[game];
-    const nextPicks = [...storyPicks, choice.tag];
+    const nextPicks = [...storyPicks, tag];
     setStoryPicks(nextPicks);
-    setStoryLog((prev) => [...prev, choice.reply]);
+    setStoryLog((prev) => [...prev, reply]);
     playChime(392 + Math.random() * 60);
     const next = storyIndex + 1;
-    if (next >= steps.length) {
+    if (next >= storySteps.length) {
       setStoryEnding(STORY_ENDING_BUILDERS[game](nextPicks));
     }
     setStoryIndex(next);
+    setHolding(false);
+  }
+
+  function chooseStoryOption(choice: StoryChoice) {
+    advanceStory(choice.tag, choice.reply);
+  }
+
+  function completeHoldStep(step: HoldStep) {
+    advanceStory(step.tag, step.reply);
   }
 
   function restartStory() {
-    setStoryIndex(0); setStoryLog([]); setStoryPicks([]); setStoryEnding(null);
+    if (game === 'ascent' || game === 'balance') newStoryGame(game);
   }
 
   function pointerToPercent(clientX: number, clientY: number) {
@@ -693,18 +817,45 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
                 {storyLog.map((line, i) => <p key={i} className="dz-story-line">{line}</p>)}
               </div>
             )}
-            {!storyEnding ? (
-              <div className="dz-story-step anim-pop" key={storyIndex}>
-                <p className="dz-story-prompt">{STORY_STEPS[game][storyIndex].prompt}</p>
-                <div className="dz-story-choices">
-                  {STORY_STEPS[game][storyIndex].choices.map((c) => (
-                    <button key={c.label} className="dz-story-choice" onClick={() => chooseStoryOption(c)} type="button">
-                      {c.label}
-                    </button>
-                  ))}
+            {!storyEnding && storySteps.length > 0 && (() => {
+              const step = storySteps[storyIndex];
+              return (
+                <div className="dz-story-step anim-pop" key={storyIndex}>
+                  <p className="dz-story-prompt">{step.prompt}</p>
+                  {step.kind === 'choice' ? (
+                    <div className="dz-story-choices">
+                      {step.choices.map((c) => (
+                        <button key={c.label} className="dz-story-choice" onClick={() => chooseStoryOption(c)} type="button">
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="dz-story-hold-wrap">
+                      <button
+                        type="button"
+                        className="dz-story-hold"
+                        onPointerDown={() => setHolding(true)}
+                        onPointerUp={() => setHolding(false)}
+                        onPointerLeave={() => setHolding(false)}
+                        onPointerCancel={() => setHolding(false)}
+                      >
+                        <span
+                          className={`dz-story-hold-fill ${holding ? 'holding' : ''}`}
+                          onTransitionEnd={(e) => {
+                            if (e.propertyName === 'transform' && (e.target as HTMLElement).classList.contains('holding')) {
+                              completeHoldStep(step);
+                            }
+                          }}
+                        />
+                      </button>
+                      <span className="dz-story-hold-label">{step.holdLabel}</span>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ) : (
+              );
+            })()}
+            {storyEnding && (
               <div className="dz-story-ending anim-pop">
                 <p className="dz-story-ending-title">{storyEnding.title}</p>
                 <p className="dz-story-ending-body">{storyEnding.body}</p>
@@ -788,6 +939,11 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
         .dz-story-choice { padding: 14px 18px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 14.5px; font-weight: 600; cursor: pointer; text-align: left; transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease; }
         .dz-story-choice:hover { border-color: var(--primary-200); background: rgba(112,130,56,0.06); }
         .dz-story-choice:active { transform: scale(0.98); }
+        .dz-story-hold-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+        .dz-story-hold { position: relative; width: 96px; height: 96px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); cursor: pointer; overflow: hidden; touch-action: none; }
+        .dz-story-hold-fill { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, var(--primary-200), var(--primary)); transform: scale(0); transition: transform 0.3s ease; }
+        .dz-story-hold-fill.holding { transition: transform 1.3s linear; transform: scale(1); }
+        .dz-story-hold-label { font-size: 13.5px; color: var(--text-soft); max-width: 220px; text-align: center; }
         .dz-story-ending { max-width: 420px; width: 100%; text-align: center; display: flex; flex-direction: column; gap: 14px; }
         .dz-story-ending-title { margin: 0; font-size: 19px; font-weight: 700; color: var(--primary-600); }
         .dz-story-ending-body { margin: 0; font-size: 15px; color: var(--text-soft); line-height: 1.6; }
