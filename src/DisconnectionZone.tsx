@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react';
-import { X, Volume2, VolumeX, Circle, Leaf, CloudRain, Lock, Sparkles } from 'lucide-react';
+import { X, Volume2, VolumeX, Circle, Leaf, CloudRain, Lock, Sparkles, Mountain, Scale } from 'lucide-react';
 import { openCheckout } from './lib/payments';
 
 interface Props {
@@ -10,7 +10,7 @@ interface Props {
   name?: string | null;
 }
 
-type GameId = 'spheres' | 'trace' | 'raindrop' | 'particles';
+type GameId = 'spheres' | 'trace' | 'raindrop' | 'particles' | 'ascent' | 'balance';
 
 interface Sphere {
   id: number;
@@ -52,6 +52,124 @@ interface Particle {
   hue: number;
   age: number;
 }
+
+interface StoryChoice {
+  label: string;
+  tag: string;
+  reply: string;
+}
+
+interface StoryStep {
+  prompt: string;
+  choices: StoryChoice[];
+}
+
+interface StoryEnding {
+  title: string;
+  body: string;
+}
+
+// "El Ascenso" (La Travesía de la Vida): cuatro obstáculos cotidianos, cada
+// uno con dos formas igual de válidas de seguir adelante (seguir con
+// constancia o tomarse una pausa). Ninguna elección es un error ni corta el
+// camino — todas llevan a la cima, solo que por rutas distintas.
+const ASCENT_STEPS: StoryStep[] = [
+  {
+    prompt: 'El camino empieza empinado. Ni siquiera has dado el primer paso y ya sientes el peso de la subida.',
+    choices: [
+      { label: 'Doy el primer paso, aunque sea lento', tag: 'constancia', reply: 'Avanzas despacio, pero avanzas. El camino empieza a moverse contigo.' },
+      { label: 'Me quedo un momento mirando la cima', tag: 'pausa', reply: 'Te tomas un segundo para mirar hacia arriba. No es rendirte, es tomar aire antes de empezar.' },
+    ],
+  },
+  {
+    prompt: 'A mitad de camino, una duda te alcanza: "¿y si esto no vale la pena?".',
+    choices: [
+      { label: 'Sigo caminando con la duda a cuestas', tag: 'constancia', reply: 'La duda no desaparece, pero tampoco te detiene. Caminas con ella, no contra ella.' },
+      { label: 'Me siento un rato a dejar que la duda hable', tag: 'pausa', reply: 'Te sientas junto a la duda un momento. A veces escucharla es lo que la hace más pequeña.' },
+    ],
+  },
+  {
+    prompt: 'Las piernas pesan. El cansancio ya no es una idea, es real.',
+    choices: [
+      { label: 'Aprieto el paso un poco más', tag: 'constancia', reply: 'El cuerpo protesta, pero responde. Un paso, y otro, y otro.' },
+      { label: 'Bajo el ritmo, sin dejar de moverme', tag: 'pausa', reply: 'Bajas el ritmo sin detenerte del todo. El cansancio deja de ser un enemigo y pasa a ser solo parte del camino.' },
+    ],
+  },
+  {
+    prompt: 'Ves la cima, más cerca que nunca, justo cuando menos fuerza sientes tener.',
+    choices: [
+      { label: 'Uso lo poco que me queda para llegar', tag: 'constancia', reply: 'Con lo último que te queda, das los pasos finales.' },
+      { label: 'Respiro hondo antes del último tramo', tag: 'pausa', reply: 'Una última respiración, profunda, antes del tramo final.' },
+    ],
+  },
+];
+
+function buildAscentEnding(picks: string[]): StoryEnding {
+  const pausas = picks.filter((p) => p === 'pausa').length;
+  const constancia = picks.filter((p) => p === 'constancia').length;
+  let body: string;
+  if (pausas > constancia) {
+    body = 'Llegaste tomándote tu tiempo, respirando cuando lo necesitabas. Aquí arriba se ve claro: no hizo falta correr, solo no soltarte del camino.';
+  } else if (constancia > pausas) {
+    body = 'Llegaste a puro paso firme, casi sin detenerte. Aquí arriba se siente el esfuerzo en cada músculo — y también la certeza de que sí pudiste.';
+  } else {
+    body = 'Llegaste combinando fuerza y pausa, avanzando y descansando cuando tocaba. Las dos cosas te trajeron hasta aquí.';
+  }
+  return {
+    title: 'Llegaste arriba.',
+    body: `${body} El camino no fue igual al de nadie más, pero el esfuerzo constante — a tu manera — fue lo que te sostuvo hasta el final.`,
+  };
+}
+
+// "El Equilibrio Interior" (El Desafío de las Decisiones Clave): un dilema
+// personal resuelto en tres momentos, alternando entre mirar hacia adentro
+// (reflexión) y confiar en lo que ya se sabe de uno mismo (instinto).
+const BALANCE_STEPS: StoryStep[] = [
+  {
+    prompt: 'Tienes en la cabeza una decisión importante pendiente, y sientes la presión de resolverla ya.',
+    choices: [
+      { label: 'Analizo cada opción con calma', tag: 'reflexion', reply: 'Te tomas el tiempo de mirar la decisión desde varios ángulos, sin apurarte a cerrar el tema.' },
+      { label: 'Sigo lo que mi instinto ya me dice', tag: 'instinto', reply: 'Confías en esa primera respuesta que ya tenías, la que apareció antes de pensar demasiado.' },
+    ],
+  },
+  {
+    prompt: 'Notas que parte de la presión no viene de la decisión en sí, sino de lo que otros podrían pensar de tu elección.',
+    choices: [
+      { label: 'Me pregunto qué es lo que yo realmente quiero', tag: 'reflexion', reply: 'Apartas por un momento las voces externas y te haces la pregunta que importa: ¿qué quieres tú?' },
+      { label: 'Reconozco esa presión y decido igual', tag: 'instinto', reply: 'Ves la presión con claridad, la nombras, y decides sin dejar que sea ella quien elija por ti.' },
+    ],
+  },
+  {
+    prompt: 'Llega el momento de decidir. Ya no hay más información nueva que esperar.',
+    choices: [
+      { label: 'Elijo la opción que más se alinea con lo que soy', tag: 'reflexion', reply: 'Eliges desde quién eres, no desde el miedo a equivocarte.' },
+      { label: 'Elijo y confío en poder ajustar el rumbo después', tag: 'instinto', reply: 'Eliges sabiendo que ninguna decisión es definitiva del todo — siempre se puede ajustar el rumbo.' },
+    ],
+  },
+];
+
+function buildBalanceEnding(picks: string[]): StoryEnding {
+  const reflexion = picks.filter((p) => p === 'reflexion').length;
+  const instinto = picks.filter((p) => p === 'instinto').length;
+  let body: string;
+  if (reflexion > instinto) {
+    body = 'Resolviste esto mirando hacia adentro, con calma. Ese ejercicio de conocerte fue, en el fondo, la verdadera decisión.';
+  } else if (instinto > reflexion) {
+    body = 'Resolviste esto confiando en lo que ya sabías de ti. Esa confianza también es una forma de autoconocimiento.';
+  } else {
+    body = 'Resolviste esto combinando reflexión e instinto — dos formas distintas de escucharte a ti mismo.';
+  }
+  return {
+    title: 'Tomaste la decisión.',
+    body: `${body} El dilema no desaparece solo por decidir, pero ahora sabes un poco más de cómo te mueves frente a lo difícil. Eso ya es una ganancia.`,
+  };
+}
+
+const STORY_STEPS: Record<'ascent' | 'balance', StoryStep[]> = { ascent: ASCENT_STEPS, balance: BALANCE_STEPS };
+const STORY_ENDING_BUILDERS: Record<'ascent' | 'balance', (picks: string[]) => StoryEnding> = {
+  ascent: buildAscentEnding,
+  balance: buildBalanceEnding,
+};
 
 const SPHERE_COLORS = ['#A8B87E', '#8FAF6B', '#C9A66B', '#B08BC0', '#6FA8B8'];
 const PAIR_COUNT = 4;
@@ -97,6 +215,11 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
 
   const [particles, setParticles] = useState<Particle[]>([]);
   const nextParticleId = useRef(0);
+
+  const [storyIndex, setStoryIndex] = useState(0);
+  const [storyLog, setStoryLog] = useState<string[]>([]);
+  const [storyPicks, setStoryPicks] = useState<string[]>([]);
+  const [storyEnding, setStoryEnding] = useState<StoryEnding | null>(null);
 
   const audioRef = useRef<AudioContext | null>(null);
   const nextSphereId = useRef(0);
@@ -277,6 +400,30 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
     return () => clearInterval(interval);
   }, [open, game]);
 
+  // Story games (ascent / balance): se reinician al abrir o al cambiar de juego.
+  useEffect(() => {
+    if (!open || (game !== 'ascent' && game !== 'balance')) return;
+    setStoryIndex(0); setStoryLog([]); setStoryPicks([]); setStoryEnding(null);
+  }, [open, game]);
+
+  function chooseStoryOption(choice: StoryChoice) {
+    if (game !== 'ascent' && game !== 'balance') return;
+    const steps = STORY_STEPS[game];
+    const nextPicks = [...storyPicks, choice.tag];
+    setStoryPicks(nextPicks);
+    setStoryLog((prev) => [...prev, choice.reply]);
+    playChime(392 + Math.random() * 60);
+    const next = storyIndex + 1;
+    if (next >= steps.length) {
+      setStoryEnding(STORY_ENDING_BUILDERS[game](nextPicks));
+    }
+    setStoryIndex(next);
+  }
+
+  function restartStory() {
+    setStoryIndex(0); setStoryLog([]); setStoryPicks([]); setStoryEnding(null);
+  }
+
   function pointerToPercent(clientX: number, clientY: number) {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return { x: 50, y: 50 };
@@ -412,6 +559,8 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
     { id: 'raindrop', title: 'Melodías', icon: CloudRain, locked: false },
     { id: 'trace', title: 'Trazar', icon: Leaf, locked: !isPremium },
     { id: 'particles', title: 'Partículas', icon: Sparkles, locked: !isPremium },
+    { id: 'ascent', title: 'El Ascenso', icon: Mountain, locked: !isPremium },
+    { id: 'balance', title: 'Equilibrio Interior', icon: Scale, locked: !isPremium },
   ];
 
   return (
@@ -536,6 +685,34 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
             })}
           </>
         )}
+
+        {(game === 'ascent' || game === 'balance') && (
+          <div className="dz-story">
+            {storyLog.length > 0 && (
+              <div className="dz-story-feed">
+                {storyLog.map((line, i) => <p key={i} className="dz-story-line">{line}</p>)}
+              </div>
+            )}
+            {!storyEnding ? (
+              <div className="dz-story-step anim-pop" key={storyIndex}>
+                <p className="dz-story-prompt">{STORY_STEPS[game][storyIndex].prompt}</p>
+                <div className="dz-story-choices">
+                  {STORY_STEPS[game][storyIndex].choices.map((c) => (
+                    <button key={c.label} className="dz-story-choice" onClick={() => chooseStoryOption(c)} type="button">
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="dz-story-ending anim-pop">
+                <p className="dz-story-ending-title">{storyEnding.title}</p>
+                <p className="dz-story-ending-body">{storyEnding.body}</p>
+                <button className="dz-story-restart" onClick={restartStory} type="button">Empezar de nuevo</button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <p className="dz-hint">
@@ -543,6 +720,8 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
         {game === 'raindrop' && 'Cada gota es una nota. Límpialas a tu ritmo y descubre la melodía.'}
         {game === 'trace' && 'Traza líneas suaves con el dedo. Sin meta, sin destino.'}
         {game === 'particles' && 'Toca y desliza el dedo. Cada roce enciende una partícula y un tono distinto.'}
+        {game === 'ascent' && 'Elige a tu ritmo. No hay una decisión correcta, solo tu manera de subir.'}
+        {game === 'balance' && 'Elige lo que resuene más contigo en cada momento. No hay respuesta equivocada.'}
       </p>
 
       <style>{`
@@ -599,6 +778,21 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
 
         .dz-trace-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
         .dz-trace-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: rgba(168,184,126,0.8); transform: translate(-50%, -50%); pointer-events: none; transition: opacity 0.1s; }
+
+        .dz-story { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 28px 24px; overflow-y: auto; }
+        .dz-story-feed { display: flex; flex-direction: column; gap: 8px; max-width: 420px; width: 100%; opacity: 0.55; }
+        .dz-story-line { margin: 0; font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+        .dz-story-step { max-width: 420px; width: 100%; text-align: center; display: flex; flex-direction: column; gap: 18px; }
+        .dz-story-prompt { margin: 0; font-size: 17px; font-weight: 600; color: var(--text); line-height: 1.5; }
+        .dz-story-choices { display: flex; flex-direction: column; gap: 10px; }
+        .dz-story-choice { padding: 14px 18px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 14.5px; font-weight: 600; cursor: pointer; text-align: left; transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease; }
+        .dz-story-choice:hover { border-color: var(--primary-200); background: rgba(112,130,56,0.06); }
+        .dz-story-choice:active { transform: scale(0.98); }
+        .dz-story-ending { max-width: 420px; width: 100%; text-align: center; display: flex; flex-direction: column; gap: 14px; }
+        .dz-story-ending-title { margin: 0; font-size: 19px; font-weight: 700; color: var(--primary-600); }
+        .dz-story-ending-body { margin: 0; font-size: 15px; color: var(--text-soft); line-height: 1.6; }
+        .dz-story-restart { align-self: center; margin-top: 6px; padding: 10px 22px; border-radius: 999px; border: 1px solid var(--primary-200); background: rgba(112,130,56,0.08); color: var(--primary-600); font-size: 13.5px; font-weight: 700; cursor: pointer; }
+        .dz-story-restart:hover { background: rgba(112,130,56,0.14); }
 
         .dz-hint { text-align: center; padding: 12px 20px 24px; padding-bottom: max(24px, env(safe-area-inset-bottom)); font-size: 14px; color: var(--text-soft); margin: 0; }
       `}</style>
