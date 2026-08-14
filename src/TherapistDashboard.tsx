@@ -52,6 +52,7 @@ export default function TherapistDashboard() {
   const [linkName, setLinkName] = useState('');
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [linkSentMsg, setLinkSentMsg] = useState<string | null>(null);
   const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
@@ -197,15 +198,14 @@ export default function TherapistDashboard() {
     if (!name || linking) return;
     setLinking(true);
     setLinkError(null);
+    setLinkSentMsg(null);
     try {
       const { data, error } = await supabase.rpc('link_patient', { p_name: name }).single<{ id: string; full_name: string }>();
       if (error) throw error;
+      // El vínculo queda pendiente hasta que el paciente lo acepte desde su
+      // cuenta: recién entonces aparecerá en la lista (RLS lo exige).
+      setLinkSentMsg(`Solicitud enviada a ${data.full_name}. Aparecerá en tu lista cuando la acepte.`);
       setLinkName('');
-      const { data: full } = await supabase.from('profiles').select('*').eq('id', data.id).maybeSingle();
-      setPatients((prev) => {
-        const withoutExisting = prev.filter((p) => p.id !== data.id);
-        return [...(full ? [full as Profile] : []), ...withoutExisting];
-      });
     } catch (err) {
       setLinkError(err instanceof Error ? err.message : 'No se pudo vincular al paciente');
     } finally {
@@ -330,7 +330,7 @@ export default function TherapistDashboard() {
             <div className="th-section-icon"><Users size={18} strokeWidth={2} /></div>
             <div>
               <h2>Mis pacientes</h2>
-              <p>Vincula pacientes por nombre para ver sus registros y reportes</p>
+              <p>Vincula pacientes por nombre para ver sus registros y reportes. Deben aceptar la solicitud desde su cuenta.</p>
             </div>
           </div>
           <form className="th-link-form" onSubmit={linkPatient}>
@@ -346,6 +346,7 @@ export default function TherapistDashboard() {
             </button>
           </form>
           {linkError && <p className="th-link-error">{linkError}</p>}
+          {linkSentMsg && <p className="th-link-sent">{linkSentMsg}</p>}
           {!loading && (
             <div className="th-patient-list">
               {patients.length === 0 ? (
@@ -536,6 +537,7 @@ export default function TherapistDashboard() {
           .th-link-form input { flex: 1 1 220px; padding: 11px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
           .th-link-form input:focus { border-color: var(--primary); outline: none; }
           .th-link-error { margin: 0; padding: 0 20px 8px; font-size: 13px; color: var(--danger); }
+        .th-link-sent { margin: 0; padding: 0 20px 8px; font-size: 13px; color: var(--primary-600); }
           .th-patient-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px 20px; }
           .th-empty-inline { margin: 0; font-size: 13px; color: var(--text-soft); }
           .th-patient-chip { display: flex; align-items: center; gap: 4px; padding: 6px 8px 6px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 13px; font-weight: 600; color: var(--text); }

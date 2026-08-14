@@ -13,6 +13,14 @@ export interface Profile {
   bio: string | null;
 }
 
+export interface PatientLink {
+  id: string;
+  psychologist_id: string;
+  patient_id: string;
+  status: 'pending' | 'accepted';
+  created_at: string;
+}
+
 export interface ClinicalNote {
   id: string;
   patient_id: string;

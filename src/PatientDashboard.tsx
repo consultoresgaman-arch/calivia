@@ -41,6 +41,8 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const [sosInitialGrounding, setSosInitialGrounding] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [pendingLinks, setPendingLinks] = useState<{ psychologistId: string; name: string }[]>([]);
+  const [linkActionId, setLinkActionId] = useState<string | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const isPremium = !!profile?.is_premium;
   const maxFree = isPremium ? Infinity : MAX_FREE_MESSAGES;
@@ -66,6 +68,29 @@ export default function PatientDashboard({ onExitToHome }: Props) {
     })();
     return () => { mounted = false; };
   }, [profile, today]);
+
+  async function loadPendingLinks() {
+    const { data: links } = await supabase.from('patient_links').select('psychologist_id').eq('status', 'pending');
+    if (!links || links.length === 0) { setPendingLinks([]); return; }
+    const ids = links.map((l) => l.psychologist_id);
+    const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+    setPendingLinks(links.map((l) => ({
+      psychologistId: l.psychologist_id,
+      name: profs?.find((p) => p.id === l.psychologist_id)?.full_name ?? 'Un profesional',
+    })));
+  }
+
+  useEffect(() => { loadPendingLinks(); }, []);
+
+  async function respondToLink(psychologistId: string, accept: boolean) {
+    setLinkActionId(psychologistId);
+    try {
+      await supabase.rpc(accept ? 'accept_patient_link' : 'reject_patient_link', { p_psychologist_id: psychologistId });
+      setPendingLinks((prev) => prev.filter((l) => l.psychologistId !== psychologistId));
+    } finally {
+      setLinkActionId(null);
+    }
+  }
 
   async function saveRecoveryEmail(e: React.FormEvent) {
     e.preventDefault();
@@ -115,6 +140,34 @@ export default function PatientDashboard({ onExitToHome }: Props) {
                   <div className="user-menu-info">
                     <div className="user-menu-name">{profile?.full_name || 'Usuario'}</div>
                   </div>
+                  {pendingLinks.length > 0 && (
+                    <div className="user-menu-links">
+                      <span>Solicitudes de vinculación</span>
+                      {pendingLinks.map((l) => (
+                        <div key={l.psychologistId} className="user-menu-link-row">
+                          <p>{l.name} quiere ver tu progreso y acompañarte.</p>
+                          <div className="user-menu-link-actions">
+                            <button
+                              type="button"
+                              className="user-menu-link-accept"
+                              disabled={linkActionId === l.psychologistId}
+                              onClick={() => respondToLink(l.psychologistId, true)}
+                            >
+                              Aceptar
+                            </button>
+                            <button
+                              type="button"
+                              className="user-menu-link-reject"
+                              disabled={linkActionId === l.psychologistId}
+                              onClick={() => respondToLink(l.psychologistId, false)}
+                            >
+                              Rechazar
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <button className="user-menu-edit-profile" onClick={() => { setMenuOpen(false); setProfileModalOpen(true); }} type="button">
                     <UserCog size={16} strokeWidth={2} /><span>Editar perfil</span>
                   </button>
@@ -308,6 +361,15 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         .user-menu-info { padding-bottom: 10px; border-bottom: 1px solid var(--border-soft); margin-bottom: 10px; }
         .user-menu-name { font-size: 14px; font-weight: 700; }
         .user-menu-email { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
+        .user-menu-links { display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border-soft); }
+        .user-menu-links > span { font-size: 12px; font-weight: 700; color: var(--text); }
+        .user-menu-link-row { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 10px; background: var(--surface-2); }
+        .user-menu-link-row p { margin: 0; font-size: 12px; color: var(--text-soft); line-height: 1.4; }
+        .user-menu-link-actions { display: flex; gap: 6px; }
+        .user-menu-link-accept, .user-menu-link-reject { flex: 1; padding: 6px 8px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; border: none; }
+        .user-menu-link-accept { background: var(--primary); color: #fff; }
+        .user-menu-link-reject { background: transparent; border: 1px solid var(--border); color: var(--text-soft); }
+        .user-menu-link-accept:disabled, .user-menu-link-reject:disabled { opacity: 0.6; cursor: default; }
         .user-menu-recovery { display: flex; flex-direction: column; gap: 4px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border-soft); }
         .user-menu-recovery > span { font-size: 12px; font-weight: 700; color: var(--text); }
         .user-menu-recovery p { margin: 0; font-size: 11px; color: var(--text-soft); line-height: 1.4; }
