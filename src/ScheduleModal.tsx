@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { X, Mail, CalendarClock, Sparkles } from 'lucide-react';
 import { isCheckoutConfigured, openCheckout } from './lib/payments';
+import { useT } from './lib/i18n';
+import strings from './ScheduleModal.i18n';
 
 interface Props {
   open: boolean;
@@ -33,6 +35,7 @@ function ensureCalendlyScript(onReady: () => void) {
 
 export default function ScheduleModal({ open, onClose, isPremium, userId, name }: Props) {
   const widgetRef = useRef<HTMLDivElement>(null);
+  const t = useT(strings);
 
   useEffect(() => {
     if (!open) return;
@@ -53,30 +56,30 @@ export default function ScheduleModal({ open, onClose, isPremium, userId, name }
   return (
     <div className="schedule-overlay">
       <div className="schedule-bar">
-        <button className="schedule-close" onClick={onClose} type="button"><X size={20} /><span>Volver</span></button>
+        <button className="schedule-close" onClick={onClose} type="button"><X size={20} /><span>{t('back')}</span></button>
       </div>
 
       <div className="schedule-info">
         {isPremium ? (
           <p className="schedule-price schedule-price-premium">
             <Sparkles size={15} strokeWidth={2} />
-            Inversión preferencial por ser miembro: <strong>$25.000 CLP</strong> <span>(~$27 USD)</span>
+            {t('premiumPricePrefix')} <strong>$25.000 CLP</strong> <span>(~$27 USD)</span>
           </p>
         ) : (
           <>
             <p className="schedule-price">
               <CalendarClock size={15} strokeWidth={2} />
-              Inversión por la sesión: <strong>$35.000 CLP</strong> <span>(~$38 USD)</span>
+              {t('regularPricePrefix')} <strong>$35.000 CLP</strong> <span>(~$38 USD)</span>
             </p>
             {isCheckoutConfigured() && (
               <button type="button" className="schedule-upsell" onClick={() => openCheckout({ userId, name })}>
-                ¿Quieres ahorrar $10.000 CLP (~$11 USD) en esta sesión? Hazte miembro Premium aquí
+                {t('upsell')}
               </button>
             )}
           </>
         )}
         <a className="schedule-contact" href={`mailto:${CONTACT_EMAIL}`}>
-          <Mail size={14} strokeWidth={2} /><span>¿Dudas antes de agendar? {CONTACT_EMAIL}</span>
+          <Mail size={14} strokeWidth={2} /><span>{t('contact', { email: CONTACT_EMAIL })}</span>
         </a>
       </div>
 

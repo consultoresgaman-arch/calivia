@@ -3,6 +3,9 @@ import { X, Camera, Loader2 } from 'lucide-react';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
 import { uploadAvatar, getAvatarSignedUrl } from './lib/avatar';
+import { useT } from './lib/i18n';
+import LanguageSelector from './LanguageSelector';
+import strings from './ProfileSettingsModal.i18n';
 
 interface Props {
   open: boolean;
@@ -11,6 +14,7 @@ interface Props {
 
 export default function ProfileSettingsModal({ open, onClose }: Props) {
   const { profile, refreshProfile } = useAuth();
+  const t = useT(strings);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -51,7 +55,7 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
       setAvatarUrl(url);
       await refreshProfile();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'No se pudo subir la foto');
+      setMessage(err instanceof Error ? err.message : t('uploadFailed'));
     } finally {
       setUploadingAvatar(false);
     }
@@ -68,9 +72,9 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
         .eq('id', profile.id);
       if (error) throw error;
       await refreshProfile();
-      setMessage('Guardado.');
+      setMessage(t('saved'));
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'No se pudo guardar');
+      setMessage(err instanceof Error ? err.message : t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -79,11 +83,11 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
   return (
     <div className="psm-overlay">
       <div className="psm-bar">
-        <button className="psm-close" onClick={onClose} type="button"><X size={20} /><span>Volver</span></button>
+        <button className="psm-close" onClick={onClose} type="button"><X size={20} /><span>{t('back')}</span></button>
       </div>
 
       <div className="psm-content">
-        <h2>Editar perfil</h2>
+        <h2>{t('title')}</h2>
 
         <div className="psm-avatar-row">
           <div className="psm-avatar">
@@ -91,24 +95,29 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
             {uploadingAvatar && <div className="psm-avatar-loading"><Loader2 size={18} className="psm-spin" /></div>}
           </div>
           <button className="psm-avatar-btn" onClick={() => fileInputRef.current?.click()} type="button" disabled={uploadingAvatar}>
-            <Camera size={14} strokeWidth={2} /><span>Cambiar foto</span>
+            <Camera size={14} strokeWidth={2} /><span>{t('changePhoto')}</span>
           </button>
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarPick} hidden />
+        </div>
+
+        <div className="psm-field">
+          <span>{t('language')}</span>
+          <LanguageSelector />
         </div>
 
         {isPsychologist && (
           <div className="psm-fields">
             <label className="psm-field">
-              <span>Teléfono</span>
+              <span>{t('phone')}</span>
               <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+56 9 1234 5678" />
             </label>
             <label className="psm-field">
-              <span>Número de registro profesional</span>
-              <input type="text" value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="Ej. Superintendencia de Salud N°..." />
+              <span>{t('licenseNumber')}</span>
+              <input type="text" value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder={t('licensePlaceholder')} />
             </label>
             <label className="psm-field">
-              <span>Biografía corta</span>
-              <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={4} placeholder="Cuéntale a tus pacientes un poco de tu enfoque y experiencia." />
+              <span>{t('bio')}</span>
+              <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={4} placeholder={t('bioPlaceholder')} />
             </label>
           </div>
         )}
@@ -117,7 +126,7 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
 
         {isPsychologist && (
           <button className="psm-save" onClick={handleSave} disabled={saving} type="button">
-            {saving ? 'Guardando…' : 'Guardar cambios'}
+            {saving ? t('saving') : t('saveChanges')}
           </button>
         )}
       </div>

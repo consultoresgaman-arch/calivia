@@ -4,6 +4,25 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 import { supabase } from './lib/supabase';
 import type { ChatLog } from './lib/types';
 import { isCheckoutConfigured, openCheckout } from './lib/payments';
+import { useLanguage, useT, localizeBackendError, type LanguageCode } from './lib/i18n';
+import strings, {
+  SYSTEM_NOTE,
+  QUICK_PROMPTS,
+  FALLBACK_GREETINGS,
+  BURST_ACK_REPLIES,
+  SOCRATIC_FOLLOWUPS,
+  CLOSURE_REPLIES,
+  CRISIS_FALLBACK_REPLY,
+  MEANING_REPLY,
+  DIAGNOSIS_REPLY,
+  NO_ANSWER_REPLY,
+  RISK_KEYWORDS,
+  MEANING_TRIGGERS,
+  DIAGNOSIS_TRIGGERS,
+  GRATITUDE_TRIGGERS,
+  ADVICE_TRIGGERS,
+  SPEECH_LANG_TAG,
+} from './AiChat.i18n';
 
 interface MicPermissionPlugin {
   requestMicPermission(): Promise<{ granted: boolean }>;
@@ -32,33 +51,13 @@ function voiceQualityScore(v: SpeechSynthesisVoice): number {
   return score;
 }
 
-const SYSTEM_NOTE = 'Soy Calivia (la unión de calma y alivio). Un espacio de acompañamiento, no sustituyo la atención profesional.';
-
 const VOICE_INPUT_ENABLED = true;
-
-const QUICK_PROMPTS = [
-  'No sé por dónde empezar',
-  'Necesito un momento para respirar',
-  'Hoy fue un día difícil',
-  'Solo quiero que alguien me escuche',
-];
 
 // Protocolo de espera (anti-interrupción): si el usuario sigue escribiendo
 // mensajes seguidos (mientras la IA todavía está "pensando" o apenas
 // terminó de responder), no lanzamos otro análisis largo — solo un acuse
 // breve, local, y esperamos a que haya una pausa real antes de responder.
 const FRAGMENT_QUIET_MS = 3500;
-const BURST_ACK_REPLIES = [
-  'Te sigo leyendo, continúa.',
-  'Aquí estoy. Sigue, tómate tu tiempo.',
-  'Te escucho, continúa cuando quieras.',
-];
-
-const FALLBACK_GREETINGS = {
-  morning: 'Buenos días, soy Calivia. ¿Cómo te sientes para comenzar tu día?',
-  afternoon: 'Hola, buenas tardes, soy Calivia. Recuerda que debes comer, o ¿ya has comido? ¿Cómo va tu día?',
-  night: 'Hola, soy Calivia. ¿Cómo estuvo tu día hoy? ¿Ya has cenado?',
-};
 
 function getTimeOfDay(): 'morning' | 'afternoon' | 'night' {
   const h = new Date().getHours();
@@ -67,82 +66,51 @@ function getTimeOfDay(): 'morning' | 'afternoon' | 'night' {
   return 'night';
 }
 
-const SOCRATIC_FOLLOWUPS = [
-  'Y cuando eso pasó, ¿qué parte crees que fue tuya y qué parte fue del otro lado? Pienso que hay algo ahí que no estás mirando.',
-  'Déjame preguntarte algo directo: ¿estás reaccionando a lo que pasó o a lo que te imaginas que significa? A veces nos enojamos con la historia, no con los hechos.',
-  'Pongo en la mesa algo incómodo: dices que no tuviste elección, pero siempre hay una. ¿Qué ganaste al quedarte callado? ¿Qué estabas protegiendo?',
-  'Te escucho, pero noto que te estás quedando en lo que el otro hizo mal. ¿Y tú? ¿Qué responsabilidad tienes en cómo terminó?',
-  'Parémonos aquí un momento. Dices "no puedo más", pero llevas días diciéndolo sin cambiar nada. ¿Qué te impide dar el primer paso? ¿Miedo o costumbre?',
-  'Voy a cuestionarte algo: ¿de verdad crees que eso que sientes es miedo al cambio, o es miedo a perder el control de una situación que ya no te sirve?',
-  'Te lo digo sin rodeos: estás pidiendo que el otro cambie para no tener que moverte tú. ¿Qué pasaría si el otro no cambia? ¿Te quedarías así para siempre?',
-  'Noto un patrón: todo lo que cuentas tiene al otro como protagonista y a ti como espectador. ¿Cuándo vas a tomar el rol principal de tu historia?',
-];
-
-const CLOSURE_REPLIES = [
-  'Eso que acabas de decir es tuyo, no mío. Quédate con eso. Cuando lo pongas en práctica, vuelve y me cuentas.',
-  'Me gustó lo que dijiste. No te voy a dar un discurso, solo esto: confío en que lo vas a hacer bien.',
-  'Buena reflexión. Ese insight es el primer paso. El segundo es actuar. Aquí estaré cuando lo necesites.',
-  'Llegaste ahí por ti mismo, que es como debe ser. Sigue ese instinto, no te traiciones.',
-];
-
 // Mismo lexicón de riesgo del backend (supabase/functions/ai-chat/index.ts),
 // para que el protocolo de crisis funcione igual de firme incluso si esta
-// respuesta de respaldo local es la que termina usándose (sin conexión).
-const RISK_KEYWORDS = [
-  'suicid', 'quitarme la vida', 'no quiero seguir viviendo', 'no quiero vivir',
-  'terminar con todo', 'terminar con mi vida', 'acabar con mi vida', 'acabar con todo',
-  'hacerme daño', 'hacerme dano', 'autolesion', 'autolesión', 'cortarme',
-  'no aguanto más', 'no aguanto mas', 'quiero desaparecer', 'desaparecer para siempre',
-  'ya no puedo más', 'ya no puedo mas', 'no vale la pena vivir', 'no vale la pena seguir',
-  'no quiero estar aquí', 'no quiero estar aqui', 'me quiero matar', 'quiero matarme',
-  'matarme', 'me quiero morir', 'quiero morir', 'ya no tiene sentido vivir',
-];
+// respuesta de respaldo local es la que termina usándose (sin conexión). Se
+// revisan los tres idiomas a la vez, sin importar el idioma de la interfaz.
+const ALL_RISK_KEYWORDS = [...RISK_KEYWORDS.es, ...RISK_KEYWORDS.en, ...RISK_KEYWORDS.pt];
 
 function detectRiskKeyword(text: string): boolean {
   const normalized = text.toLowerCase();
-  return RISK_KEYWORDS.some((kw) => normalized.includes(kw));
+  return ALL_RISK_KEYWORDS.some((kw) => normalized.includes(kw));
 }
 
-const CRISIS_FALLBACK_REPLY = [
-  'Lo que acabas de compartir me llega hondo, y quiero decírtelo con toda claridad: no estás solo en esto, y tu vida tiene un valor inmenso, aunque ahora mismo cueste sentirlo así.',
-  'Piensa un segundo en las personas que te quieren —hijos, pareja, padres, hermanos, algún amigo cercano— y sostente en esa idea un momento: son parte de tu ancla, tu motor, una razón real para seguir.',
-  'Si estás en peligro inmediato, contacta ya a los servicios de emergencia de tu país (por ejemplo, el 911 o su equivalente local). Mientras tanto, un sonido de anclaje en "Sonidos" (lluvia, latidos, viento) puede ayudarte a bajar la intensidad.',
-  'Usa ahora mismo el botón de "Respiro urgente" de esta app para tener a la mano un contacto de confianza y un ejercicio de respiración guiada. No te quedes solo con esto — habla con alguien ahora.',
-].join('\n\n');
-
-function generateClientFallback(message: string, conversation: ChatLog[]): string {
+function generateClientFallback(message: string, conversation: ChatLog[], lang: LanguageCode): string {
   // El protocolo de crisis va primero, incluso antes del saludo de bienvenida:
   // si el primer mensaje de la persona ya es una señal de riesgo, jamás debe
   // recibir un saludo genérico en su lugar.
-  if (detectRiskKeyword(message)) return CRISIS_FALLBACK_REPLY;
+  if (detectRiskKeyword(message)) return CRISIS_FALLBACK_REPLY[lang];
 
   const userTurns = conversation.filter((m) => m.role === 'user');
   const isFirstMessage = userTurns.length === 0;
 
-  if (isFirstMessage) return FALLBACK_GREETINGS[getTimeOfDay()];
+  if (isFirstMessage) return FALLBACK_GREETINGS[lang][getTimeOfDay()];
 
   const lower = message.toLowerCase();
   const assistantTurns = conversation.filter((m) => m.role === 'assistant');
   const lastAssistant = assistantTurns[assistantTurns.length - 1];
 
-  if (lower.includes('significa') && (lower.includes('calivia') || lower.includes('tu nombre'))) {
-    return 'Calivia nace de la unión entre calma y alivio. Es el significado real de este espacio: un refugio diseñado para ofrecerte exactamente eso, un lugar donde puedas pausar y encontrar sosiego.';
+  const meaning = MEANING_TRIGGERS[lang];
+  if (meaning.primary.some((k) => lower.includes(k)) && meaning.secondary.some((k) => lower.includes(k))) {
+    return MEANING_REPLY[lang];
   }
-  if (lower.includes('diagnóstico') || lower.includes('diagnostico') || lower.includes('tengo algo')) {
-    return 'No tengo la capacidad de dar un diagnóstico clínico, pero puedo acompañarte. Para una evaluación profesional, te invito a agendar una sesión con el especialista: https://calendly.com/consultoresgaman/30min';
+  if (DIAGNOSIS_TRIGGERS[lang].some((k) => lower.includes(k))) {
+    return DIAGNOSIS_REPLY[lang];
   }
 
   if (lastAssistant && (lastAssistant.content.includes('Ponme en contexto') || lastAssistant.content.includes('qué fue lo que pasó'))) {
-    return SOCRATIC_FOLLOWUPS[message.length % SOCRATIC_FOLLOWUPS.length];
+    return SOCRATIC_FOLLOWUPS[lang][message.length % SOCRATIC_FOLLOWUPS[lang].length];
   }
-  if (lower.includes('gracias') || lower.includes('me sirve') || lower.includes('tiene sentido')) {
-    return CLOSURE_REPLIES[message.length % CLOSURE_REPLIES.length];
+  if (GRATITUDE_TRIGGERS[lang].some((k) => lower.includes(k))) {
+    return CLOSURE_REPLIES[lang][message.length % CLOSURE_REPLIES[lang].length];
   }
-  if (message.includes('?') && (lower.includes('qué hago') || lower.includes('que hago') || lower.includes('cómo'))) {
-    return 'No te voy a dar la respuesta, porque no es mía para dar. Déjame preguntarte: si yo no estuviera aquí y tuvieras que decidir solo, ¿qué harías? Esa intuición que aparece cuando nadie te dice qué hacer... ¿qué te dice?';
+  if (message.includes('?') && ADVICE_TRIGGERS[lang].some((k) => lower.includes(k))) {
+    return NO_ANSWER_REPLY[lang];
   }
 
-  return SOCRATIC_FOLLOWUPS[message.length % SOCRATIC_FOLLOWUPS.length];
+  return SOCRATIC_FOLLOWUPS[lang][message.length % SOCRATIC_FOLLOWUPS[lang].length];
 }
 
 interface SpeechRecognitionResult {
@@ -172,6 +140,8 @@ interface Props {
 }
 
 export default function AiChat({ userId, name, messagesSent, maxFree, onMessageSent }: Props) {
+  const { lang } = useLanguage();
+  const t = useT(strings);
   const [messages, setMessages] = useState<ChatLog[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
@@ -211,14 +181,15 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     }
 
     let settled = false;
+    hasSelectedVoiceRef.current = false;
 
     function loadVoices() {
       try {
         const allVoices = window.speechSynthesis.getVoices();
         if (allVoices.length === 0) return;
 
-        const spanishVoices = allVoices.filter((v) => v.lang.toLowerCase().includes('es'));
-        const pool = spanishVoices.length > 0 ? spanishVoices : allVoices;
+        const langVoices = allVoices.filter((v) => v.lang.toLowerCase().startsWith(lang));
+        const pool = langVoices.length > 0 ? langVoices : allVoices;
         const highQuality = pool.filter((v) => voiceQualityScore(v) > 0);
         const usable = (highQuality.length > 0 ? highQuality : pool)
           .slice()
@@ -226,7 +197,10 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         setVoices(usable);
         if (!hasSelectedVoiceRef.current) {
           hasSelectedVoiceRef.current = true;
-          const preferred = usable.find((v) => v.lang.toLowerCase().includes('co') || v.lang.toLowerCase().includes('419')) || usable[0];
+          // Para español, preferimos variantes latinoamericanas cuando existan.
+          const preferred = (lang === 'es'
+            ? usable.find((v) => v.lang.toLowerCase().includes('co') || v.lang.toLowerCase().includes('419'))
+            : undefined) || usable[0];
           setSelectedVoiceUri(preferred.voiceURI);
         }
         settled = true;
@@ -256,7 +230,8 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       window.clearTimeout(timeout);
       if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = null;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang]);
 
   function speakResponse(text: string) {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
@@ -270,7 +245,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         chosenVoice = voices.find((v) => v.voiceURI === selectedVoiceUri);
         if (chosenVoice) utterance.voice = chosenVoice;
       }
-      utterance.lang = chosenVoice?.lang || 'es-ES';
+      utterance.lang = chosenVoice?.lang || SPEECH_LANG_TAG[lang];
       utterance.rate = 0.95;
       utterance.pitch = 1;
 
@@ -312,7 +287,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         .order('created_at', { ascending: true })
         .limit(100);
       if (!mounted) return;
-      if (error) setError(error.message);
+      if (error) setError(localizeBackendError(error.message, lang));
       else setMessages(data ?? []);
       setLoading(false);
     })();
@@ -371,7 +346,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition as SpeechRecognitionConstructor;
     if (!SR) {
       console.error('[Calivia] startVoiceInput: SpeechRecognition no está disponible en este navegador.');
-      setError('Tu navegador no soporta dictado por voz.');
+      setError(t('errNoVoiceSupport'));
       return;
     }
 
@@ -381,12 +356,12 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     try {
       const micGranted = await ensureMicPermission();
       if (!micGranted) {
-        setError('Necesitamos permiso de micrófono para dictar por voz. Revísalo en los ajustes de la app.');
+        setError(t('errMicPermission'));
         return;
       }
 
       const recognition = new SR();
-      recognition.lang = 'es-ES';
+      recognition.lang = SPEECH_LANG_TAG[lang];
       recognition.continuous = false;
       recognition.interimResults = true;
 
@@ -400,7 +375,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       const watchdog = window.setTimeout(() => {
         console.error('[Calivia] SpeechRecognition no dio señales de vida a tiempo; forzando detención.');
         try { recognition.stop(); } catch { /* ignore */ }
-        setError('El micrófono no respondió. Verifica que el servicio de reconocimiento de voz de tu dispositivo esté activo e intenta de nuevo.');
+        setError(t('errMicNoResponse'));
         setRecording(false);
         recognitionRef.current = null;
       }, 10000);
@@ -430,9 +405,9 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         console.error('[Calivia] SpeechRecognition onerror:', errEvent.error);
         window.clearTimeout(watchdog);
         if (errEvent.error === 'not-allowed' || errEvent.error === 'service-not-allowed') {
-          setError('No se pudo acceder al micrófono. Revisa los permisos del navegador.');
+          setError(t('errMicNotAllowed'));
         } else if (errEvent.error !== 'no-speech' && errEvent.error !== 'aborted') {
-          setError('No se pudo transcribir la voz. Intenta escribir tu mensaje.');
+          setError(t('errTranscribeFailed'));
         }
         setRecording(false);
         recognitionRef.current = null;
@@ -452,7 +427,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       recognition.start();
     } catch (err) {
       console.error('[Calivia] startVoiceInput falló inesperadamente:', err);
-      setError('No se pudo iniciar el dictado por voz. Intenta de nuevo.');
+      setError(t('errVoiceInputFailed'));
       setRecording(false);
       recognitionRef.current = null;
     }
@@ -490,7 +465,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       setMessages((m) => m.map((x) => (x.id === tempId ? saved : x)));
       onMessageSent();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error inesperado');
+      setError(err instanceof Error ? localizeBackendError(err.message, lang) : t('errUnexpected'));
       setMessages((m) => m.filter((x) => x.id !== tempId));
       setInput(text);
       if (!fragmentTimerRef.current) chainActiveRef.current = false;
@@ -503,7 +478,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     // acuse breve, y reiniciamos la espera — sin bloquear el input.
     if (joiningActiveChain || fragmentTimerRef.current) {
       if (fragmentTimerRef.current) clearTimeout(fragmentTimerRef.current);
-      const ack = BURST_ACK_REPLIES[ackIndexRef.current % BURST_ACK_REPLIES.length];
+      const ack = BURST_ACK_REPLIES[lang][ackIndexRef.current % BURST_ACK_REPLIES[lang].length];
       ackIndexRef.current++;
       setMessages((m) => [...m, { id: `ack-${Date.now()}`, user_id: userId, role: 'assistant', content: ack, created_at: new Date().toISOString() }]);
       fragmentTimerRef.current = window.setTimeout(async () => {
@@ -530,7 +505,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           'Content-Type': 'application/json',
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({ userId, message: text, localTime }),
+        body: JSON.stringify({ userId, message: text, localTime, lang }),
       });
 
       let reply: string = '';
@@ -539,14 +514,14 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       if (res.ok) {
         const json = await res.json();
         reply = json.reply ?? json.message ?? '';
-        if (!reply) throw new Error('Respuesta vacía del asistente.');
+        if (!reply) throw new Error(t('errEmptyReply'));
         isFallback = !!json.fallback;
       } else if (res.status >= 500) {
-        reply = generateClientFallback(text, messages);
+        reply = generateClientFallback(text, messages, lang);
         isFallback = true;
       } else {
         const txt = await res.text().catch(() => '');
-        throw new Error(`El asistente no respondió (${res.status}). ${txt.slice(0, 120)}`);
+        throw new Error(t('errAssistantNoResponse', { status: res.status, detail: txt.slice(0, 120) }));
       }
 
       setUsingFallback(isFallback);
@@ -557,7 +532,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         speakResponse(reply);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error inesperado';
+      const msg = err instanceof Error ? localizeBackendError(err.message, lang) : t('errUnexpected');
       setError(msg);
     } finally {
       setSending(false);
@@ -572,20 +547,20 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         </div>
         <div className="chat-head-info">
           <h2>Calivia</h2>
-          <p>{SYSTEM_NOTE}</p>
+          <p>{SYSTEM_NOTE[lang]}</p>
         </div>
       </div>
 
       {(voicesLoading || voices.length > 0) && (
       <div className="voice-selector-bar">
         <label htmlFor="voice-select">
-          <Volume2 size={14} /> Voz de Calivia:
+          <Volume2 size={14} /> {t('voiceLabel')}
         </label>
         <select
           id="voice-select"
           value={selectedVoiceUri}
           onChange={(e) => setSelectedVoiceUri(e.target.value)}
-          aria-label="Seleccionar voz de Calivia"
+          aria-label={t('voiceSelectAria')}
           disabled={voicesLoading}
         >
           {voices.length > 0 ? (
@@ -595,7 +570,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
               </option>
             ))
           ) : (
-            <option value="">Buscando voces…</option>
+            <option value="">{t('searchingVoices')}</option>
           )}
         </select>
       </div>
@@ -603,16 +578,16 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
 
       <div className="chat-body" ref={scrollRef}>
         {loading ? (
-          <div className="chat-empty">Cargando tu espacio…</div>
+          <div className="chat-empty">{t('loadingSpace')}</div>
         ) : messages.length === 0 ? (
           <div className="chat-welcome">
             <div className="chat-welcome-icon">
               <Heart size={24} strokeWidth={1.5} />
             </div>
-            <p>{FALLBACK_GREETINGS[getTimeOfDay()]}</p>
-            <p className="chat-welcome-sub">Te escucho, sin prisa.</p>
+            <p>{FALLBACK_GREETINGS[lang][getTimeOfDay()]}</p>
+            <p className="chat-welcome-sub">{t('welcomeSub')}</p>
             <div className="quick-prompts">
-              {QUICK_PROMPTS.map((q) => (
+              {QUICK_PROMPTS[lang].map((q) => (
                 <button key={q} type="button" className="quick-chip" onClick={() => send(null, q, false)} disabled={limitReached}>
                   {q}
                 </button>
@@ -646,28 +621,28 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
 
       {usingFallback && !sending && (
         <div className="chat-fallback-note">
-          Calivia está en modo de respaldo. Tus mensajes siguen siendo escuchados.
+          {t('fallbackNote')}
         </div>
       )}
       {ttsBlocked && (
         <button type="button" className="tts-blocked-note" onClick={replayLastResponse}>
-          <Volume2 size={14} strokeWidth={2} /><span>Tu navegador bloqueó el audio automático — toca aquí para escuchar la respuesta</span>
+          <Volume2 size={14} strokeWidth={2} /><span>{t('ttsBlockedNote')}</span>
         </button>
       )}
       {error && <div className="chat-error">{error}</div>}
       {limitReached && !sending && (
         <div className="chat-limit">
-          <p>Has alcanzado el límite diario de la Versión Calma.</p>
+          <p>{t('limitReached')}</p>
           {isCheckoutConfigured() ? (
             <button
               className="chat-limit-cta"
               type="button"
               onClick={() => openCheckout({ userId, name })}
             >
-              <Zap size={14} strokeWidth={2.5} /><span>Desbloquear Calivia Ilimitada</span>
+              <Zap size={14} strokeWidth={2.5} /><span>{t('unlockUnlimited')}</span>
             </button>
           ) : (
-            <p className="chat-limit-sub">Explora Calivia Ilimitada arriba.</p>
+            <p className="chat-limit-sub">{t('exploreUnlimited')}</p>
           )}
         </div>
       )}
@@ -676,9 +651,9 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={limitReached ? 'Límite diario alcanzado…' : recording ? 'Escuchando… habla ahora' : 'Escribe lo que traes dentro…'}
+          placeholder={limitReached ? t('inputPlaceholderLimit') : recording ? t('inputPlaceholderListening') : t('inputPlaceholderDefault')}
           disabled={limitReached}
-          aria-label="Mensaje a Calivia"
+          aria-label={t('inputAria')}
           rows={1}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e, undefined, false); }
@@ -690,8 +665,8 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
             className={`mic-btn ${recording ? 'rec' : ''} ${!voiceSupported ? 'disabled' : ''}`}
             onClick={startVoiceInput}
             disabled={limitReached || !voiceSupported}
-            aria-label={recording ? 'Detener grabación' : 'Hablar al micrófono'}
-            title={voiceSupported ? 'Dictar por voz y recibir respuesta hablada' : 'Tu navegador no soporta dictado por voz'}
+            aria-label={recording ? t('stopRecording') : t('speakToMic')}
+            title={voiceSupported ? t('micTitleSupported') : t('micTitleUnsupported')}
           >
             <Mic size={18} strokeWidth={2} />
           </button>

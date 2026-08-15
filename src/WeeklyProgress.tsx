@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { TrendingUp } from 'lucide-react';
 import { supabase } from './lib/supabase';
-import { MOOD_EMOJI, MOOD_LABELS, MOOD_COLOR } from './lib/types';
+import { MOOD_EMOJI, MOOD_COLOR } from './lib/types';
 import type { CheckIn } from './lib/types';
+import { useT } from './lib/i18n';
+import strings from './WeeklyProgress.i18n';
 
 interface Props {
   userId: string;
 }
-
-const DAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
 function localDateKey(d: Date): string {
   const y = d.getFullYear();
@@ -27,10 +27,14 @@ function startOfWeek(d: Date): Date {
 }
 
 export default function WeeklyProgress({ userId }: Props) {
+  const t = useT(strings);
   const [checkins, setCheckins] = useState<CheckIn[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeDay, setActiveDay] = useState<number | null>(null);
+
+  const moodLabel = (m: number) => t(`mood${m}` as 'mood1');
+  const DAY_LABELS = [t('dayMon'), t('dayTue'), t('dayWed'), t('dayThu'), t('dayFri'), t('daySat'), t('daySun')];
 
   const weekStart = useMemo(() => startOfWeek(new Date()), []);
   const historyStart = useMemo(() => {
@@ -109,18 +113,18 @@ export default function WeeklyProgress({ userId }: Props) {
       <div className="wp-head">
         <div className="wp-icon"><TrendingUp size={18} strokeWidth={2} /></div>
         <div>
-          <h2>Tu semana</h2>
-          <p>Cómo ha fluctuado tu ánimo de lunes a domingo</p>
+          <h2>{t('title')}</h2>
+          <p>{t('subtitle')}</p>
         </div>
       </div>
 
       {isSunday && (
-        <div className="wp-sunday-banner">Hoy es domingo, un buen momento para mirar cómo estuvo tu semana.</div>
+        <div className="wp-sunday-banner">{t('sundayBanner')}</div>
       )}
 
       <div className="wp-checkin">
         <p className="wp-checkin-label">
-          {todayMood ? '¿Cambió algo? Puedes actualizar tu ánimo de hoy.' : '¿Cómo te sientes ahora?'}
+          {todayMood ? t('checkinChanged') : t('checkinNew')}
         </p>
         <div className="wp-mood-row">
           {[1, 2, 3, 4, 5].map((m) => (
@@ -130,8 +134,8 @@ export default function WeeklyProgress({ userId }: Props) {
               className={`wp-mood-btn ${todayMood === m ? 'active' : ''}`}
               onClick={() => logMood(m)}
               disabled={saving}
-              aria-label={MOOD_LABELS[m]}
-              title={MOOD_LABELS[m]}
+              aria-label={moodLabel(m)}
+              title={moodLabel(m)}
             >
               <span>{MOOD_EMOJI[m]}</span>
             </button>
@@ -140,9 +144,9 @@ export default function WeeklyProgress({ userId }: Props) {
       </div>
 
       {loading ? (
-        <div className="wp-loading">Cargando tu semana…</div>
+        <div className="wp-loading">{t('loading')}</div>
       ) : (
-        <div className="wp-chart" role="img" aria-label="Gráfico de ánimo de la semana, de lunes a domingo">
+        <div className="wp-chart" role="img" aria-label={t('weekChartAriaLabel')}>
           {days.map((d, i) => {
             const hasData = d.mood !== null;
             const pct = hasData ? Math.max(10, (d.mood! / 5) * 100) : 8;
@@ -150,13 +154,13 @@ export default function WeeklyProgress({ userId }: Props) {
             return (
               <div key={d.key} className="wp-bar-col">
                 {activeDay === i && (
-                  <div className="wp-tooltip">{hasData ? MOOD_LABELS[d.mood!] : 'Sin registro este día'}</div>
+                  <div className="wp-tooltip">{hasData ? moodLabel(d.mood!) : t('noEntryThisDay')}</div>
                 )}
                 <button
                   type="button"
                   className="wp-bar-hit"
                   onClick={() => setActiveDay(activeDay === i ? null : i)}
-                  aria-label={`${d.label}: ${hasData ? MOOD_LABELS[d.mood!] : 'Sin registro'}`}
+                  aria-label={`${d.label}: ${hasData ? moodLabel(d.mood!) : t('noEntry')}`}
                 >
                   <span className="wp-bar-emoji">{hasData ? MOOD_EMOJI[d.mood!] : '·'}</span>
                   <span
@@ -173,8 +177,8 @@ export default function WeeklyProgress({ userId }: Props) {
 
       {!loading && (
         <div className="wp-history">
-          <h3>Últimas 8 semanas</h3>
-          <div className="wp-history-chart" role="img" aria-label="Tendencia de ánimo promedio de las últimas 8 semanas">
+          <h3>{t('last8Weeks')}</h3>
+          <div className="wp-history-chart" role="img" aria-label={t('historyChartAriaLabel')}>
             {weeklyHistory.map((w) => {
               const hasData = w.avg !== null;
               const pct = hasData ? Math.max(10, (w.avg! / 5) * 100) : 6;

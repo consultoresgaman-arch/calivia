@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckSquare, Square, Trash2, Bell, BellOff, Plus } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import type { TaskItem } from './lib/types';
+import { useLanguage, useT, type LanguageCode } from './lib/i18n';
+import strings from './TaskManager.i18n';
 
 interface Props {
   userId: string;
@@ -9,19 +11,24 @@ interface Props {
 
 const NOTIF_SUPPORTED = typeof window !== 'undefined' && 'Notification' in window;
 
-function formatDue(dueAt: string): string {
+const DATE_LOCALE: Record<LanguageCode, string> = { es: 'es-CL', en: 'en-US', pt: 'pt-PT' };
+
+function formatDue(dueAt: string, lang: LanguageCode, todayLabel: string, tomorrowLabel: string): string {
   const d = new Date(dueAt);
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
   const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
   const isTomorrow = d.toDateString() === tomorrow.toDateString();
-  const time = d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-  if (sameDay) return `Hoy ${time}`;
-  if (isTomorrow) return `Mañana ${time}`;
-  return `${d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })} ${time}`;
+  const locale = DATE_LOCALE[lang];
+  const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return `${todayLabel} ${time}`;
+  if (isTomorrow) return `${tomorrowLabel} ${time}`;
+  return `${d.toLocaleDateString(locale, { day: 'numeric', month: 'short' })} ${time}`;
 }
 
 export default function TaskManager({ userId }: Props) {
+  const { lang } = useLanguage();
+  const tr = useT(strings);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
@@ -64,7 +71,7 @@ export default function TaskManager({ userId }: Props) {
       if (t.done || !t.due_at || notifiedRef.current.has(t.id)) continue;
       if (new Date(t.due_at).getTime() <= now) {
         notifiedRef.current.add(t.id);
-        try { new Notification('Calivia · Recordatorio', { body: t.title }); } catch { /* ignore */ }
+        try { new Notification(tr('reminderTitle'), { body: t.title }); } catch { /* ignore */ }
       }
     }
   }, [now, tasks, notifPermission]);
@@ -113,22 +120,22 @@ export default function TaskManager({ userId }: Props) {
       <div className="tk-head">
         <div className="tk-icon"><CheckSquare size={18} strokeWidth={2} /></div>
         <div>
-          <h2>Tareas del día</h2>
-          <p>Pendientes laborales, de estudio o personales, con hora si quieres recordatorio.</p>
+          <h2>{tr('title')}</h2>
+          <p>{tr('subtitle')}</p>
         </div>
       </div>
 
       {NOTIF_SUPPORTED && notifPermission !== 'granted' && (
         <button className="tk-notif-btn" onClick={requestNotifPermission} type="button">
           <Bell size={14} strokeWidth={2} />
-          <span>Activar recordatorios en este navegador</span>
+          <span>{tr('enableReminders')}</span>
         </button>
       )}
       {!NOTIF_SUPPORTED && (
-        <div className="tk-notif-note"><BellOff size={13} strokeWidth={2} /><span>Tu navegador no soporta notificaciones; los recordatorios solo se ven aquí dentro.</span></div>
+        <div className="tk-notif-note"><BellOff size={13} strokeWidth={2} /><span>{tr('noNotifSupport')}</span></div>
       )}
       {NOTIF_SUPPORTED && notifPermission === 'granted' && (
-        <p className="tk-notif-hint">Los recordatorios suenan mientras tengas Calivia abierta en este navegador.</p>
+        <p className="tk-notif-hint">{tr('notifHint')}</p>
       )}
 
       <form className="tk-form" onSubmit={addTask}>
@@ -136,14 +143,14 @@ export default function TaskManager({ userId }: Props) {
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="¿Qué necesitas hacer?"
+          placeholder={tr('titlePlaceholder')}
           required
         />
         <input
           type="datetime-local"
           value={dueInput}
           onChange={(e) => setDueInput(e.target.value)}
-          aria-label="Hora del recordatorio (opcional)"
+          aria-label={tr('reminderTimeAriaLabel')}
         />
         <button type="submit" className="tk-add-btn" disabled={adding || !title.trim()}>
           <Plus size={18} strokeWidth={2.5} />
@@ -151,26 +158,26 @@ export default function TaskManager({ userId }: Props) {
       </form>
 
       {loading ? (
-        <div className="tk-loading">Cargando tus tareas…</div>
+        <div className="tk-loading">{tr('loading')}</div>
       ) : tasks.length === 0 ? (
-        <div className="tk-empty">Sin tareas por ahora. Agrega la primera arriba.</div>
+        <div className="tk-empty">{tr('empty')}</div>
       ) : (
         <div className="tk-list">
           {pending.map((t) => {
             const overdue = !!t.due_at && new Date(t.due_at).getTime() <= now;
             return (
               <div key={t.id} className={`tk-item ${overdue ? 'overdue' : ''}`}>
-                <button className="tk-check" onClick={() => toggleDone(t)} type="button" aria-label="Marcar hecha">
+                <button className="tk-check" onClick={() => toggleDone(t)} type="button" aria-label={tr('markDone')}>
                   <Square size={19} strokeWidth={2} />
                 </button>
                 <div className="tk-body">
                   <span className="tk-title">{t.title}</span>
                   <div className="tk-meta">
-                    {t.due_at && <span className="tk-due">{formatDue(t.due_at)}</span>}
-                    {t.assigned_by && <span className="tk-assigned-badge">De tu especialista</span>}
+                    {t.due_at && <span className="tk-due">{formatDue(t.due_at, lang, tr('today'), tr('tomorrow'))}</span>}
+                    {t.assigned_by && <span className="tk-assigned-badge">{tr('assignedBySpecialist')}</span>}
                   </div>
                 </div>
-                <button className="tk-delete" onClick={() => removeTask(t.id)} type="button" aria-label="Eliminar">
+                <button className="tk-delete" onClick={() => removeTask(t.id)} type="button" aria-label={tr('delete')}>
                   <Trash2 size={15} strokeWidth={2} />
                 </button>
               </div>
@@ -178,16 +185,16 @@ export default function TaskManager({ userId }: Props) {
           })}
           {done.length > 0 && (
             <>
-              <div className="tk-divider"><span>Hechas</span></div>
+              <div className="tk-divider"><span>{tr('done')}</span></div>
               {done.map((t) => (
                 <div key={t.id} className="tk-item done">
-                  <button className="tk-check checked" onClick={() => toggleDone(t)} type="button" aria-label="Marcar pendiente">
+                  <button className="tk-check checked" onClick={() => toggleDone(t)} type="button" aria-label={tr('markPending')}>
                     <CheckSquare size={19} strokeWidth={2} />
                   </button>
                   <div className="tk-body">
                     <span className="tk-title">{t.title}</span>
                   </div>
-                  <button className="tk-delete" onClick={() => removeTask(t.id)} type="button" aria-label="Eliminar">
+                  <button className="tk-delete" onClick={() => removeTask(t.id)} type="button" aria-label={tr('delete')}>
                     <Trash2 size={15} strokeWidth={2} />
                   </button>
                 </div>

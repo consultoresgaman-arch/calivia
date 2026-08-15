@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { X, Phone, UserPlus, Trash2, Volume2, VolumeX, Vibrate, ArrowLeft } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Haptics } from '@capacitor/haptics';
-import { CRISIS_LINES } from './lib/crisis';
+import { CRISIS_LINES, localizeCountryLabel, localizeCrisisLine } from './lib/crisis';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
+import { useLanguage, useT } from './lib/i18n';
+import strings from './SosModal.i18n';
 
 interface Props {
   open: boolean;
@@ -31,6 +33,8 @@ const PHASE_DURATION: Record<BreathPhase, number> = { inhale: 4000, exhale: 6000
 
 export default function SosModal({ open, onClose, initialGrounding }: Props) {
   const { profile, refreshProfile } = useAuth();
+  const { lang } = useLanguage();
+  const t = useT(strings);
   const [country, setCountry] = useState(profile?.country ?? '');
   const [saving, setSaving] = useState(false);
   const [phase, setPhase] = useState<BreathPhase>('inhale');
@@ -209,7 +213,7 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
   return (
     <div className="sos-overlay" onClick={onClose}>
       <div className="sos-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <button className="sos-close" onClick={onClose} aria-label="Cerrar" type="button"><X size={20} /></button>
+        <button className="sos-close" onClick={onClose} aria-label={t('close')} type="button"><X size={20} /></button>
 
         {groundingActive ? (
           <div className="ground-view">
@@ -218,7 +222,7 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
               onClick={() => { stopGroundingVibration(); setGroundingActive(false); }}
               type="button"
             >
-              <ArrowLeft size={16} strokeWidth={2} /><span>Volver</span>
+              <ArrowLeft size={16} strokeWidth={2} /><span>{t('back')}</span>
             </button>
             <div
               className={`ground-zone ${vibrating ? 'active' : ''}`}
@@ -229,11 +233,11 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
             >
               <div className="ground-pulse" />
               <p className="ground-instruction">
-                {vibrating ? 'Sigue así… respira con el ritmo' : 'Mantén tus dedos aquí'}
+                {vibrating ? t('breathingWithRhythm') : t('keepFingersHere')}
               </p>
               {!VIBRATION_LIKELY_SUPPORTED && (
                 <p className="ground-fallback-note">
-                  Tu dispositivo no soporta vibración: usa el pulso visual como guía para tu respiración.
+                  {t('noVibrationSupport')}
                 </p>
               )}
             </div>
@@ -247,24 +251,24 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
             style={{ transition: `transform ${PHASE_DURATION[phase]}ms ease-in-out, border-radius ${PHASE_DURATION[phase]}ms ease-in-out` }}
           />
           <div className="breath-label" key={phase + cycle}>
-            <span className="breath-phase">{isExpanding ? 'Inhala' : 'Exhala'}</span>
-            {cycle > 0 && <span className="breath-cycle">Ciclo {cycle + 1}</span>}
+            <span className="breath-phase">{isExpanding ? t('inhale') : t('exhale')}</span>
+            {cycle > 0 && <span className="breath-cycle">{t('cycle', { n: cycle + 1 })}</span>}
           </div>
           <button className={`audio-toggle ${audioOn ? 'active' : ''}`} onClick={toggleAudio} type="button">
             {audioOn ? <Volume2 size={16} strokeWidth={2} /> : <VolumeX size={16} strokeWidth={2} />}
-            <span>{audioOn ? 'Sonido activado' : 'Activar lluvia suave'}</span>
+            <span>{audioOn ? t('soundOn') : t('soundOff')}</span>
           </button>
           <button className="grounding-entry-btn" onClick={() => setGroundingActive(true)} type="button">
-            <Vibrate size={15} strokeWidth={2} /><span>Anclaje por vibración</span>
+            <Vibrate size={15} strokeWidth={2} /><span>{t('groundingEntry')}</span>
           </button>
         </div>
 
-        <div className="sos-divider"><span>Contacto de confianza</span></div>
+        <div className="sos-divider"><span>{t('trustedContact')}</span></div>
         <div className="sos-contacts">
           {contactsLoading ? (
-            <p className="sos-contacts-empty">Cargando…</p>
+            <p className="sos-contacts-empty">{t('loading')}</p>
           ) : contacts.length === 0 ? (
-            <p className="sos-contacts-empty">Agrega a alguien en quien confías para llamarlo en momentos difíciles.</p>
+            <p className="sos-contacts-empty">{t('noContactsHint')}</p>
           ) : (
             contacts.map((c) => (
               <div key={c.id} className="trusted-contact">
@@ -275,7 +279,7 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
                     <span className="trusted-phone">{c.phone}</span>
                   </div>
                 </a>
-                <button className="trusted-delete" onClick={() => deleteContact(c.id)} type="button" aria-label="Eliminar">
+                <button className="trusted-delete" onClick={() => deleteContact(c.id)} type="button" aria-label={t('delete')}>
                   <Trash2 size={15} strokeWidth={2} />
                 </button>
               </div>
@@ -283,44 +287,47 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
           )}
           {showContactForm ? (
             <form className="contact-form" onSubmit={addContact}>
-              <input type="text" placeholder="Nombre" value={newName} onChange={(e) => setNewName(e.target.value)} required />
+              <input type="text" placeholder={t('namePlaceholder')} value={newName} onChange={(e) => setNewName(e.target.value)} required />
               <input type="tel" placeholder="+56 9 1234 5678" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} required />
               <div className="contact-form-actions">
-                <button type="submit" className="contact-save" disabled={savingContact}>{savingContact ? 'Guardando…' : 'Guardar'}</button>
-                <button type="button" className="contact-cancel" onClick={() => setShowContactForm(false)}>Cancelar</button>
+                <button type="submit" className="contact-save" disabled={savingContact}>{savingContact ? t('saving') : t('save')}</button>
+                <button type="button" className="contact-cancel" onClick={() => setShowContactForm(false)}>{t('cancel')}</button>
               </div>
             </form>
           ) : (
             <button className="add-contact-btn" onClick={() => setShowContactForm(true)} type="button">
-              <UserPlus size={15} strokeWidth={2} /><span>Agregar contacto</span>
+              <UserPlus size={15} strokeWidth={2} /><span>{t('addContact')}</span>
             </button>
           )}
         </div>
 
-        <div className="sos-divider"><span>Líneas de emergencia</span></div>
+        <div className="sos-divider"><span>{t('emergencyLines')}</span></div>
         <div className="sos-country">
-          <label htmlFor="sos-country">Tu país</label>
+          <label htmlFor="sos-country">{t('yourCountry')}</label>
           <select id="sos-country" value={country} disabled={saving}
             onChange={(e) => { setCountry(e.target.value); saveCountry(e.target.value); }}>
-            <option value="">Selecciona…</option>
-            {Object.entries(CRISIS_LINES).map(([code, v]) => <option key={code} value={code}>{v.label}</option>)}
+            <option value="">{t('selectCountry')}</option>
+            {Object.keys(CRISIS_LINES).map((code) => <option key={code} value={code}>{localizeCountryLabel(code, lang)}</option>)}
           </select>
         </div>
         {countryInfo && (
           <div className="sos-lines">
-            {countryInfo.lines.map((line) => (
-              <a key={line.phone} className="sos-line" href={`tel:${line.phone.replace(/\s/g, '')}`}>
-                <div className="sos-line-icon"><Phone size={18} strokeWidth={2} /></div>
-                <div className="sos-line-body">
-                  <span className="sos-line-name">{line.name}</span>
-                  <span className="sos-line-phone">{line.phone}</span>
-                  {line.hours && <span className="sos-line-hours">{line.hours}{line.notes ? ` · ${line.notes}` : ''}</span>}
-                </div>
-              </a>
-            ))}
+            {countryInfo.lines.map((rawLine) => {
+              const line = localizeCrisisLine(rawLine, lang);
+              return (
+                <a key={line.phone} className="sos-line" href={`tel:${line.phone.replace(/\s/g, '')}`}>
+                  <div className="sos-line-icon"><Phone size={18} strokeWidth={2} /></div>
+                  <div className="sos-line-body">
+                    <span className="sos-line-name">{line.name}</span>
+                    <span className="sos-line-phone">{line.phone}</span>
+                    {line.hours && <span className="sos-line-hours">{line.hours}{line.notes ? ` · ${line.notes}` : ''}</span>}
+                  </div>
+                </a>
+              );
+            })}
           </div>
         )}
-        <p className="sos-disclaimer">Si tu vida corre peligro, contacta inmediatamente a los servicios de emergencia locales.</p>
+        <p className="sos-disclaimer">{t('disclaimer')}</p>
         </>
         )}
       </div>

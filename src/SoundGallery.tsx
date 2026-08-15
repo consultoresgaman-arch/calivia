@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { CloudRain, HeartPulse, Wind, Lock, Play, Pause } from 'lucide-react';
 import { openCheckout } from './lib/payments';
 import { useHeartbeatSound } from './lib/useHeartbeatSound';
+import { useT } from './lib/i18n';
+import strings from './SoundGallery.i18n';
 
 interface Props {
   isPremium: boolean;
@@ -24,11 +26,12 @@ export default function SoundGallery({ isPremium, userId, name }: Props) {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const nodesRef = useRef<AudioNode[]>([]);
   const stopFnRef = useRef<(() => void) | null>(null);
+  const t = useT(strings);
 
   const sounds: SoundDef[] = [
-    { id: 'rain', title: 'Lluvia fina', desc: 'Un manto suave de lluvia constante', icon: CloudRain, locked: false },
-    { id: 'heartbeat', title: 'Latidos', desc: 'Un pulso calmo, como un corazón en reposo', icon: HeartPulse, locked: !isPremium },
-    { id: 'wind', title: 'Viento blanco', desc: 'Un soplo continuo que cubre el ruido mental', icon: Wind, locked: !isPremium },
+    { id: 'rain', title: t('rainTitle'), desc: t('rainDesc'), icon: CloudRain, locked: false },
+    { id: 'heartbeat', title: t('heartbeatTitle'), desc: t('heartbeatDesc'), icon: HeartPulse, locked: !isPremium },
+    { id: 'wind', title: t('windTitle'), desc: t('windDesc'), icon: Wind, locked: !isPremium },
   ];
 
   function ensureCtx(): AudioContext {
@@ -137,8 +140,8 @@ export default function SoundGallery({ isPremium, userId, name }: Props) {
       <div className="sg-head">
         <div className="sg-icon"><CloudRain size={18} strokeWidth={2} /></div>
         <div>
-          <h2>Galería de sonidos</h2>
-          <p>Ambientes suaves para acompañar tu respiración o tu descanso</p>
+          <h2>{t('title')}</h2>
+          <p>{t('subtitle')}</p>
         </div>
       </div>
 
@@ -156,7 +159,7 @@ export default function SoundGallery({ isPremium, userId, name }: Props) {
               <div className="sg-item-icon"><Icon size={20} strokeWidth={1.8} /></div>
               <div className="sg-item-body">
                 <span className="sg-item-title">{s.title}{s.locked && <Lock size={12} strokeWidth={2.5} />}</span>
-                <span className="sg-item-desc">{s.locked ? 'Disponible con Calivia Ilimitada' : s.desc}</span>
+                <span className="sg-item-desc">{s.locked ? t('lockedDesc') : s.desc}</span>
               </div>
               <div className="sg-item-action">
                 {s.locked ? <Lock size={16} strokeWidth={2} /> : isPlaying ? <Pause size={18} strokeWidth={2} /> : <Play size={18} strokeWidth={2} />}

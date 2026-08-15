@@ -17,6 +17,8 @@ import JournalSpace from './JournalSpace';
 import MicroPause from './MicroPause';
 import DailySpark from './DailySpark';
 import ProfileSettingsModal from './ProfileSettingsModal';
+import { useT } from './lib/i18n';
+import strings from './PatientDashboard.i18n';
 
 const MAX_FREE_MESSAGES = 20;
 
@@ -28,6 +30,7 @@ interface Props {
 
 export default function PatientDashboard({ onExitToHome }: Props) {
   const { profile, signOut } = useAuth();
+  const t = useT(strings);
   const [section, setSection] = useState<Section>('chat');
   const [messagesSent, setMessagesSent] = useState(0);
   const [sosOpen, setSosOpen] = useState(false);
@@ -76,7 +79,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
     const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids);
     setPendingLinks(links.map((l) => ({
       psychologistId: l.psychologist_id,
-      name: profs?.find((p) => p.id === l.psychologist_id)?.full_name ?? 'Un profesional',
+      name: profs?.find((p) => p.id === l.psychologist_id)?.full_name ?? t('defaultProfessional'),
     })));
   }
 
@@ -99,9 +102,9 @@ export default function PatientDashboard({ onExitToHome }: Props) {
     try {
       const { error } = await supabase.rpc('set_recovery_email', { p_email: recoveryEmail.trim() });
       if (error) throw error;
-      setRecoveryEmailMsg('Guardado. Úsalo si alguna vez olvidas tu contraseña.');
+      setRecoveryEmailMsg(t('recoverySaved'));
     } catch (err) {
-      setRecoveryEmailMsg(err instanceof Error ? err.message : 'No se pudo guardar');
+      setRecoveryEmailMsg(err instanceof Error ? err.message : t('recoverySaveFailed'));
     } finally {
       setSavingRecoveryEmail(false);
     }
@@ -116,20 +119,20 @@ export default function PatientDashboard({ onExitToHome }: Props) {
           </div>
           <div className="header-actions">
             {onExitToHome && (
-              <button className="hdr-btn" onClick={onExitToHome} type="button" aria-label="Volver al inicio" title="Volver al inicio">
+              <button className="hdr-btn" onClick={onExitToHome} type="button" aria-label={t('backHome')} title={t('backHome')}>
                 <Home size={16} strokeWidth={2} />
-                <span className="hdr-btn-label">Inicio</span>
+                <span className="hdr-btn-label">{t('home')}</span>
               </button>
             )}
             <button
               className="hdr-btn hdr-btn-calendly"
               onClick={() => setScheduleOpen(true)}
               type="button"
-              aria-label="Agendar consulta con un especialista"
-              title="Agendar consulta"
+              aria-label={t('scheduleAria')}
+              title={t('schedule')}
             >
               <CalendarClock size={16} strokeWidth={2} />
-              <span className="hdr-btn-label">Agendar</span>
+              <span className="hdr-btn-label">{t('schedule')}</span>
             </button>
             <div className="user-chip" onClick={() => setMenuOpen((o) => !o)}>
               <div className="user-avatar">
@@ -138,14 +141,14 @@ export default function PatientDashboard({ onExitToHome }: Props) {
               {menuOpen && (
                 <div className="user-menu anim-pop" onClick={(e) => e.stopPropagation()}>
                   <div className="user-menu-info">
-                    <div className="user-menu-name">{profile?.full_name || 'Usuario'}</div>
+                    <div className="user-menu-name">{profile?.full_name || t('defaultUserName')}</div>
                   </div>
                   {pendingLinks.length > 0 && (
                     <div className="user-menu-links">
-                      <span>Solicitudes de vinculación</span>
+                      <span>{t('linkRequests')}</span>
                       {pendingLinks.map((l) => (
                         <div key={l.psychologistId} className="user-menu-link-row">
-                          <p>{l.name} quiere ver tu progreso y acompañarte.</p>
+                          <p>{t('linkRequestText', { name: l.name })}</p>
                           <div className="user-menu-link-actions">
                             <button
                               type="button"
@@ -153,7 +156,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
                               disabled={linkActionId === l.psychologistId}
                               onClick={() => respondToLink(l.psychologistId, true)}
                             >
-                              Aceptar
+                              {t('accept')}
                             </button>
                             <button
                               type="button"
@@ -161,7 +164,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
                               disabled={linkActionId === l.psychologistId}
                               onClick={() => respondToLink(l.psychologistId, false)}
                             >
-                              Rechazar
+                              {t('reject')}
                             </button>
                           </div>
                         </div>
@@ -169,26 +172,26 @@ export default function PatientDashboard({ onExitToHome }: Props) {
                     </div>
                   )}
                   <button className="user-menu-edit-profile" onClick={() => { setMenuOpen(false); setProfileModalOpen(true); }} type="button">
-                    <UserCog size={16} strokeWidth={2} /><span>Editar perfil</span>
+                    <UserCog size={16} strokeWidth={2} /><span>{t('editProfile')}</span>
                   </button>
                   <form className="user-menu-recovery" onSubmit={saveRecoveryEmail}>
-                    <span>Correo de recuperación</span>
-                    <p>Solo para recuperar tu contraseña si la olvidas. Nunca se usa para entrar.</p>
+                    <span>{t('recoveryEmailLabel')}</span>
+                    <p>{t('recoveryEmailHint')}</p>
                     <div className="user-menu-recovery-row">
                       <input
                         type="email"
                         value={recoveryEmail}
                         onChange={(e) => setRecoveryEmail(e.target.value)}
-                        placeholder="tu@correo.com"
+                        placeholder={t('recoveryEmailPlaceholder')}
                       />
                       <button type="submit" disabled={savingRecoveryEmail}>
-                        {savingRecoveryEmail ? '…' : 'Guardar'}
+                        {savingRecoveryEmail ? '…' : t('saveShort')}
                       </button>
                     </div>
                     {recoveryEmailMsg && <p className="user-menu-recovery-msg">{recoveryEmailMsg}</p>}
                   </form>
                   <button className="user-menu-logout" onClick={signOut} type="button">
-                    <LogOut size={16} strokeWidth={2} /><span>Salir</span>
+                    <LogOut size={16} strokeWidth={2} /><span>{t('logout')}</span>
                   </button>
                 </div>
               )}
@@ -215,25 +218,25 @@ export default function PatientDashboard({ onExitToHome }: Props) {
 
         <div className="section-tabs">
           <button className={`stab ${section === 'chat' ? 'active' : ''}`} onClick={() => setSection('chat')} type="button">
-            <MessageCircle size={16} strokeWidth={2} /><span>Conversar</span>
+            <MessageCircle size={16} strokeWidth={2} /><span>{t('tabChat')}</span>
           </button>
           <button className={`stab ${section === 'breathe' ? 'active' : ''}`} onClick={() => setSection('breathe')} type="button">
-            <Wind size={16} strokeWidth={2} /><span>Respirar</span>
+            <Wind size={16} strokeWidth={2} /><span>{t('tabBreathe')}</span>
           </button>
           <button className={`stab ${section === 'games' ? 'active' : ''}`} onClick={() => setSection('games')} type="button">
-            <Gamepad2 size={16} strokeWidth={2} /><span>Desconectar</span>
+            <Gamepad2 size={16} strokeWidth={2} /><span>{t('tabGames')}</span>
           </button>
           <button className={`stab ${section === 'progress' ? 'active' : ''}`} onClick={() => setSection('progress')} type="button">
-            <TrendingUp size={16} strokeWidth={2} /><span>Progreso</span>
+            <TrendingUp size={16} strokeWidth={2} /><span>{t('tabProgress')}</span>
           </button>
           <button className={`stab ${section === 'tasks' ? 'active' : ''}`} onClick={() => setSection('tasks')} type="button">
-            <CheckSquare size={16} strokeWidth={2} /><span>Tareas</span>
+            <CheckSquare size={16} strokeWidth={2} /><span>{t('tabTasks')}</span>
           </button>
           <button className={`stab ${section === 'sounds' ? 'active' : ''}`} onClick={() => setSection('sounds')} type="button">
-            <CloudRain size={16} strokeWidth={2} /><span>Sonidos</span>
+            <CloudRain size={16} strokeWidth={2} /><span>{t('tabSounds')}</span>
           </button>
           <button className={`stab ${section === 'journal' ? 'active' : ''}`} onClick={() => setSection('journal')} type="button">
-            <NotebookPen size={16} strokeWidth={2} /><span>Diario</span>
+            <NotebookPen size={16} strokeWidth={2} /><span>{t('tabJournal')}</span>
           </button>
         </div>
 
@@ -254,8 +257,8 @@ export default function PatientDashboard({ onExitToHome }: Props) {
             <div className="breathe-card">
               <div className="breathe-aura" />
               <div className="organic-figure breathe-organic" />
-              <h2>Respira a mi ritmo</h2>
-              <p>Toca para abrir el refugio de respiración</p>
+              <h2>{t('breatheTitle')}</h2>
+              <p>{t('breatheSubtitle')}</p>
             </div>
           </div>
         )}
@@ -264,8 +267,8 @@ export default function PatientDashboard({ onExitToHome }: Props) {
           <div className="games-section anim-fade" onClick={() => setDisconnectOpen(true)} role="button" tabIndex={0}>
             <div className="games-card">
               <div className="games-icon"><Gamepad2 size={28} strokeWidth={1.5} /></div>
-              <h2>Zona de desconexión</h2>
-              <p>Ejercicios táctiles para frenar la rumiación</p>
+              <h2>{t('gamesTitle')}</h2>
+              <p>{t('gamesSubtitle')}</p>
             </div>
           </div>
         )}
@@ -304,10 +307,10 @@ export default function PatientDashboard({ onExitToHome }: Props) {
 
       <div className="sos-dock">
         <button className={`calm-fab ${calmSpace.playing ? 'active' : ''}`} onClick={calmSpace.toggle} type="button">
-          <HeartPulse size={20} strokeWidth={2} /><span>Espacio de Calma</span>
+          <HeartPulse size={20} strokeWidth={2} /><span>{t('calmSpace')}</span>
         </button>
         <button className="sos-fab" onClick={() => setSosOpen(true)} type="button">
-          <Wind size={20} strokeWidth={2} /><span>Respiro urgente</span>
+          <Wind size={20} strokeWidth={2} /><span>{t('urgentBreath')}</span>
         </button>
       </div>
 

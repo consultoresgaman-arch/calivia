@@ -1,12 +1,17 @@
 import { useState } from 'react';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
+import { useLanguage, useT, localizeBackendError } from './lib/i18n';
+import LanguageSelector from './LanguageSelector';
 import type { Role } from './lib/types';
+import strings from './AuthPage.i18n';
 
 type Mode = 'signin' | 'signup' | 'forgot';
 
 export default function AuthPage() {
   const { signIn, signUp } = useAuth();
+  const { lang } = useLanguage();
+  const t = useT(strings);
   const [mode, setMode] = useState<Mode>('signin');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -36,13 +41,13 @@ export default function AuthPage() {
       const res = await fetch(fnUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ name: forgotName }),
+        body: JSON.stringify({ name: forgotName, lang }),
       });
       const json = await res.json().catch(() => ({}));
-      setForgotMessage(json.message || 'Si el nombre existe y tiene correo de recuperación, le enviamos un código.');
+      setForgotMessage(json.message || t('requestSentFallback'));
       setForgotStep('reset');
     } catch {
-      setError('No se pudo enviar la solicitud. Intenta de nuevo.');
+      setError(t('requestFailed'));
     } finally {
       setLoading(false);
     }
@@ -61,10 +66,10 @@ export default function AuthPage() {
       if (rpcError) throw rpcError;
       setFullName(forgotName);
       setPassword('');
-      setForgotMessage('Contraseña actualizada. Ya puedes iniciar sesión.');
+      setForgotMessage(t('passwordUpdated'));
       setMode('signin');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Código inválido o vencido');
+      setError(err instanceof Error ? localizeBackendError(err.message, lang) : t('invalidOrExpiredCode'));
     } finally {
       setLoading(false);
     }
@@ -81,7 +86,7 @@ export default function AuthPage() {
         await signUp(fullName, password, role);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error inesperado';
+      const msg = err instanceof Error ? localizeBackendError(err.message, lang) : t('unexpectedError');
       setError(msg);
     } finally {
       setLoading(false);
@@ -95,7 +100,7 @@ export default function AuthPage() {
         <div className="auth-brand">
           <img src="/logo-calivia.png" alt="Calivia" className="auth-logo-img" />
         </div>
-        <p className="auth-tagline">Un refugio para acompañarte</p>
+        <p className="auth-tagline">{t('tagline')}</p>
 
         {mode !== 'forgot' && (
           <div className="auth-tabs">
@@ -104,43 +109,43 @@ export default function AuthPage() {
               onClick={() => switchMode('signin')}
               type="button"
             >
-              Iniciar sesión
+              {t('signInTab')}
             </button>
             <button
               className={`atab ${mode === 'signup' ? 'active' : ''}`}
               onClick={() => switchMode('signup')}
               type="button"
             >
-              Crear cuenta
+              {t('signUpTab')}
             </button>
           </div>
         )}
 
         {mode === 'forgot' ? (
           <div className="auth-form">
-            <button type="button" className="auth-back" onClick={() => switchMode('signin')}>← Volver a iniciar sesión</button>
+            <button type="button" className="auth-back" onClick={() => switchMode('signin')}>{t('backToSignIn')}</button>
             {forgotStep === 'request' ? (
               <form onSubmit={handleRequestCode} className="auth-form" style={{ padding: 0 }}>
                 <label className="auth-field">
-                  <span>Nombre de tu cuenta</span>
+                  <span>{t('accountName')}</span>
                   <input
                     type="text"
                     required
                     value={forgotName}
                     onChange={(e) => setForgotName(e.target.value)}
-                    placeholder="Cómo te llamas en Calivia"
+                    placeholder={t('accountNamePlaceholder')}
                   />
                 </label>
                 {error && <div className="auth-error">{error}</div>}
                 <button type="submit" className="auth-btn" disabled={loading}>
-                  {loading ? 'Enviando…' : 'Enviar código'}
+                  {loading ? t('sending') : t('sendCode')}
                 </button>
               </form>
             ) : (
               <form onSubmit={handleResetWithCode} className="auth-form" style={{ padding: 0 }}>
                 {forgotMessage && <p className="auth-hint">{forgotMessage}</p>}
                 <label className="auth-field">
-                  <span>Código de 6 dígitos</span>
+                  <span>{t('codeLabel')}</span>
                   <input
                     type="text"
                     required
@@ -152,19 +157,19 @@ export default function AuthPage() {
                   />
                 </label>
                 <label className="auth-field">
-                  <span>Contraseña nueva</span>
+                  <span>{t('newPasswordLabel')}</span>
                   <input
                     type="password"
                     required
                     minLength={6}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder={t('newPasswordPlaceholder')}
                   />
                 </label>
                 {error && <div className="auth-error">{error}</div>}
                 <button type="submit" className="auth-btn" disabled={loading}>
-                  {loading ? 'Guardando…' : 'Cambiar contraseña'}
+                  {loading ? t('saving') : t('changePassword')}
                 </button>
               </form>
             )}
@@ -172,64 +177,68 @@ export default function AuthPage() {
         ) : (
           <form onSubmit={handleSubmit} className="auth-form">
             <label className="auth-field">
-              <span>Nombre</span>
+              <span>{t('nameLabel')}</span>
               <input
                 type="text"
                 required
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="Cómo te llaman"
+                placeholder={t('namePlaceholder')}
                 autoComplete="name"
               />
             </label>
 
             {mode === 'signup' && (
               <div className="auth-field">
-                <span>Rol</span>
+                <span>{t('roleLabel')}</span>
                 <div className="role-row">
                   <button
                     type="button"
                     className={`arole ${role === 'patient' ? 'active' : ''}`}
                     onClick={() => setRole('patient')}
                   >
-                    Acompañado
+                    {t('rolePatient')}
                   </button>
                   <button
                     type="button"
                     className={`arole ${role === 'psychologist' ? 'active' : ''}`}
                     onClick={() => setRole('psychologist')}
                   >
-                    Especialista
+                    {t('roleSpecialist')}
                   </button>
                 </div>
               </div>
             )}
 
             <label className="auth-field">
-              <span>Contraseña</span>
+              <span>{t('passwordLabel')}</span>
               <input
                 type="password"
                 required
                 minLength={6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Mínimo 6 caracteres"
+                placeholder={t('passwordPlaceholder')}
               />
             </label>
 
             {mode === 'signin' && (
               <button type="button" className="auth-forgot-link" onClick={() => switchMode('forgot')}>
-                ¿Olvidaste tu contraseña?
+                {t('forgotPassword')}
               </button>
             )}
 
             {error && <div className="auth-error">{error}</div>}
 
             <button type="submit" className="auth-btn" disabled={loading}>
-              {loading ? 'Cargando…' : mode === 'signin' ? 'Entrar al refugio' : 'Crear mi refugio'}
+              {loading ? t('loading') : mode === 'signin' ? t('enterShelter') : t('createShelter')}
             </button>
           </form>
         )}
+
+        <div className="auth-lang">
+          <LanguageSelector compact />
+        </div>
       </div>
 
       <style>{`
@@ -281,6 +290,11 @@ export default function AuthPage() {
           color: var(--primary-600);
           border-bottom-color: var(--primary);
           background: var(--surface-2);
+        }
+
+        .auth-lang {
+          display: flex; justify-content: center;
+          padding: 0 24px 22px;
         }
 
         .auth-form {

@@ -30,33 +30,80 @@ const SYSTEM_PROMPT = [
   '{"reflection": "...", "suggestedTool": "sounds"|"games"|"vibration"|"none", "toolReason": "..."}',
 ].join('\n');
 
-function fallbackReflection(text: string): { reflection: string; suggestedTool: string; toolReason: string } {
-  const lower = text.toLowerCase();
-  if (lower.includes('pánico') || lower.includes('panico') || lower.includes('pecho') || lower.includes('taquicardia')) {
-    return {
+type Lang = 'es' | 'en' | 'pt';
+
+function normalizeLang(value: unknown): Lang {
+  return value === 'en' || value === 'pt' ? value : 'es';
+}
+
+const LANGUAGE_DIRECTIVE: Record<Lang, string> = {
+  es: '',
+  en: '\n\nIDIOMA DE RESPUESTA: la persona tiene la app configurada en inglés. Responde SIEMPRE en inglés (aunque ella escriba en otro idioma), con el mismo tono cálido y natural, como alguien nativo de ese idioma.',
+  pt: '\n\nIDIOMA DE RESPUESTA: la persona tiene la app configurada en portugués. Responde SIEMPRE en portugués (aunque ella escriba en otro idioma), con el mismo tono cálido y natural, como alguien nativo de ese idioma.',
+};
+
+const FALLBACK_REFLECTIONS: Record<Lang, { panic: { reflection: string; toolReason: string }; rumination: { reflection: string; toolReason: string }; default: { reflection: string; toolReason: string } }> = {
+  es: {
+    panic: {
       reflection: 'Lo que describes pesa, y tiene sentido que tu cuerpo lo esté sintiendo así de fuerte. No tienes que resolverlo todo ahora mismo.',
-      suggestedTool: 'vibration',
       toolReason: 'Cuando se siente tan en el cuerpo, a veces ayuda algo igual de físico, como el anclaje por vibración.',
-    };
+    },
+    rumination: {
+      reflection: 'Se nota que le has estado dando vueltas a esto. Eso cansa, aunque no se note por fuera.',
+      toolReason: 'Para frenar un poco la cabeza, a veces ayuda algo con las manos.',
+    },
+    default: {
+      reflection: 'Gracias por soltarlo aquí, tal como venía. Quédate un momento con eso, sin apurarte a nada más.',
+      toolReason: 'Un sonido suave de fondo puede ayudarte a bajar un poco el ritmo ahora.',
+    },
+  },
+  en: {
+    panic: {
+      reflection: 'What you describe weighs a lot, and it makes sense your body is feeling it this strongly. You don’t have to solve it all right now.',
+      toolReason: 'When it feels this physical, something just as physical can help — like the vibration grounding.',
+    },
+    rumination: {
+      reflection: 'It shows you’ve been turning this over and over. That’s tiring, even if it doesn’t show on the outside.',
+      toolReason: 'To slow the mind down a bit, something for the hands can help.',
+    },
+    default: {
+      reflection: 'Thanks for letting it out here, just as it came. Stay with it for a moment, no need to rush into anything else.',
+      toolReason: 'A soft background sound can help you slow down a little right now.',
+    },
+  },
+  pt: {
+    panic: {
+      reflection: 'O que você descreve pesa bastante, e faz sentido que seu corpo esteja sentindo isso com tanta força. Você não precisa resolver tudo agora.',
+      toolReason: 'Quando é tão físico assim, às vezes ajuda algo igualmente físico, como a ancoragem por vibração.',
+    },
+    rumination: {
+      reflection: 'Dá pra notar que você tem ficado remoendo isso. Isso cansa, mesmo que não apareça por fora.',
+      toolReason: 'Para desacelerar um pouco a cabeça, às vezes ajuda algo com as mãos.',
+    },
+    default: {
+      reflection: 'Obrigado por soltar isso aqui, do jeito que veio. Fique um momento com isso, sem se apressar para mais nada.',
+      toolReason: 'Um som suave de fundo pode te ajudar a diminuir um pouco o ritmo agora.',
+    },
+  },
+};
+
+function fallbackReflection(text: string, lang: Lang): { reflection: string; suggestedTool: string; toolReason: string } {
+  const lower = text.toLowerCase();
+  const copy = FALLBACK_REFLECTIONS[lang];
+  if (lower.includes('pánico') || lower.includes('panico') || lower.includes('pecho') || lower.includes('taquicardia')) {
+    return { ...copy.panic, suggestedTool: 'vibration' };
   }
   if (lower.includes('vuelta') || lower.includes('pensando') || lower.includes('no dejo de pensar') || lower.includes('rumia')) {
-    return {
-      reflection: 'Se nota que le has estado dando vueltas a esto. Eso cansa, aunque no se note por fuera.',
-      suggestedTool: 'games',
-      toolReason: 'Para frenar un poco la cabeza, a veces ayuda algo con las manos.',
-    };
+    return { ...copy.rumination, suggestedTool: 'games' };
   }
-  return {
-    reflection: 'Gracias por soltarlo aquí, tal como venía. Quédate un momento con eso, sin apurarte a nada más.',
-    suggestedTool: 'sounds',
-    toolReason: 'Un sonido suave de fondo puede ayudarte a bajar un poco el ritmo ahora.',
-  };
+  return { ...copy.default, suggestedTool: 'sounds' };
 }
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
   try {
-    const { userId, content } = await req.json();
+    const { userId, content, lang: rawLang } = await req.json();
+    const lang = normalizeLang(rawLang);
     if (!userId || !content) {
       return new Response(JSON.stringify({ error: 'Faltan userId o content' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
@@ -71,7 +118,7 @@ Deno.serve(async (req: Request) => {
     let isFallback = false;
 
     if (!apiKey) {
-      result = fallbackReflection(content);
+      result = fallbackReflection(content, lang);
       isFallback = true;
     } else {
       const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -80,7 +127,7 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify({
           model: 'gpt-4o-mini',
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: SYSTEM_PROMPT + LANGUAGE_DIRECTIVE[lang] },
             { role: 'user', content },
           ],
           temperature: 0.7,
@@ -90,7 +137,7 @@ Deno.serve(async (req: Request) => {
       });
 
       if (!aiRes.ok) {
-        result = fallbackReflection(content);
+        result = fallbackReflection(content, lang);
         isFallback = true;
       } else {
         const aiJson = await aiRes.json();
@@ -104,7 +151,7 @@ Deno.serve(async (req: Request) => {
             toolReason: String(parsed.toolReason || ''),
           };
         } catch {
-          result = fallbackReflection(content);
+          result = fallbackReflection(content, lang);
           isFallback = true;
         }
       }

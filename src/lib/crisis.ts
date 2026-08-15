@@ -1,3 +1,5 @@
+import type { LanguageCode } from './i18n';
+
 export interface CrisisLine {
   name: string;
   phone: string;
@@ -19,6 +21,14 @@ export const CRISIS_LINES: Record<string, { label: string; lines: CrisisLine[] }
     lines: [
       { name: 'Teléfono de la Esperanza', phone: '717 003 717', hours: '24/7' },
       { name: '024 (Prevención del suicidio)', phone: '024', hours: '24/7' },
+      { name: 'Emergencias', phone: '112', hours: '24/7' },
+    ],
+  },
+  PT: {
+    label: 'Portugal',
+    lines: [
+      { name: 'SNS 24', phone: '808 24 24 24', hours: '24/7' },
+      { name: 'SOS Voz Amiga', phone: '213 544 545', hours: '16h–24h', notes: 'Verifica el horario vigente' },
       { name: 'Emergencias', phone: '112', hours: '24/7' },
     ],
   },
@@ -150,6 +160,69 @@ export const CRISIS_LINES: Record<string, { label: string; lines: CrisisLine[] }
     ],
   },
 };
+
+// Los nombres institucionales (SAPTEL, CVV, etc.) son nombres propios reales y
+// no se traducen. Solo se localizan las etiquetas de país y los términos
+// genéricos que se repiten entre países (Emergencias, notas, etc.).
+const COUNTRY_LABELS: Record<string, Record<LanguageCode, string>> = {
+  MX: { es: 'México', en: 'Mexico', pt: 'México' },
+  ES: { es: 'España', en: 'Spain', pt: 'Espanha' },
+  PT: { es: 'Portugal', en: 'Portugal', pt: 'Portugal' },
+  AR: { es: 'Argentina', en: 'Argentina', pt: 'Argentina' },
+  CO: { es: 'Colombia', en: 'Colombia', pt: 'Colômbia' },
+  CL: { es: 'Chile', en: 'Chile', pt: 'Chile' },
+  PE: { es: 'Perú', en: 'Peru', pt: 'Peru' },
+  US: { es: 'Estados Unidos', en: 'United States', pt: 'Estados Unidos' },
+  EC: { es: 'Ecuador', en: 'Ecuador', pt: 'Equador' },
+  VE: { es: 'Venezuela', en: 'Venezuela', pt: 'Venezuela' },
+  BO: { es: 'Bolivia', en: 'Bolivia', pt: 'Bolívia' },
+  PY: { es: 'Paraguay', en: 'Paraguay', pt: 'Paraguai' },
+  UY: { es: 'Uruguay', en: 'Uruguay', pt: 'Uruguai' },
+  GT: { es: 'Guatemala', en: 'Guatemala', pt: 'Guatemala' },
+  HN: { es: 'Honduras', en: 'Honduras', pt: 'Honduras' },
+  SV: { es: 'El Salvador', en: 'El Salvador', pt: 'El Salvador' },
+  NI: { es: 'Nicaragua', en: 'Nicaragua', pt: 'Nicarágua' },
+  CR: { es: 'Costa Rica', en: 'Costa Rica', pt: 'Costa Rica' },
+  PA: { es: 'Panamá', en: 'Panama', pt: 'Panamá' },
+  DO: { es: 'República Dominicana', en: 'Dominican Republic', pt: 'República Dominicana' },
+  CU: { es: 'Cuba', en: 'Cuba', pt: 'Cuba' },
+  BR: { es: 'Brasil', en: 'Brazil', pt: 'Brasil' },
+};
+
+const GENERIC_NAME_TERMS: Record<string, Record<LanguageCode, string>> = {
+  Emergencias: { es: 'Emergencias', en: 'Emergency', pt: 'Emergência' },
+  Policía: { es: 'Policía', en: 'Police', pt: 'Polícia' },
+  'Bomberos Voluntarios': { es: 'Bomberos Voluntarios', en: 'Volunteer Firefighters', pt: 'Bombeiros Voluntários' },
+  'Sistema 9-1-1': { es: 'Sistema 9-1-1', en: '9-1-1 System', pt: 'Sistema 9-1-1' },
+  'Sistema Único de Emergencias': { es: 'Sistema Único de Emergencias', en: 'Unified Emergency System', pt: 'Sistema Único de Emergência' },
+};
+
+const GENERIC_NOTE_TERMS: Record<string, Record<LanguageCode, string>> = {
+  'Llamada o WhatsApp': { es: 'Llamada o WhatsApp', en: 'Call or WhatsApp', pt: 'Ligação ou WhatsApp' },
+  'Verifica el número vigente en tu localidad': {
+    es: 'Verifica el número vigente en tu localidad',
+    en: 'Check the current number for your area',
+    pt: 'Verifique o número vigente na sua região',
+  },
+  'Verifica el horario vigente': {
+    es: 'Verifica el horario vigente',
+    en: 'Check the current hours',
+    pt: 'Verifique o horário vigente',
+  },
+  'Opción 5': { es: 'Opción 5', en: 'Option 5', pt: 'Opção 5' },
+};
+
+export function localizeCountryLabel(code: string, lang: LanguageCode): string {
+  return COUNTRY_LABELS[code]?.[lang] ?? CRISIS_LINES[code]?.label ?? code;
+}
+
+export function localizeCrisisLine(line: CrisisLine, lang: LanguageCode): CrisisLine {
+  return {
+    ...line,
+    name: GENERIC_NAME_TERMS[line.name]?.[lang] ?? line.name,
+    notes: line.notes ? GENERIC_NOTE_TERMS[line.notes]?.[lang] ?? line.notes : undefined,
+  };
+}
 
 export const COUNTRY_OPTIONS = Object.entries(CRISIS_LINES).map(([code, v]) => ({
   code,

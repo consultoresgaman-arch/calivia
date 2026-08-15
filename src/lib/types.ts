@@ -84,6 +84,14 @@ export const MOOD_LABELS: Record<number, string> = {
   5: 'Muy bien',
 };
 
+// Versión localizada de MOOD_LABELS para pantallas de paciente. El panel del
+// terapeuta sigue usando MOOD_LABELS (español) sin cambios.
+export const MOOD_LABELS_I18N: Record<'es' | 'en' | 'pt', Record<number, string>> = {
+  es: MOOD_LABELS,
+  en: { 1: 'Very low', 2: 'Low', 3: 'Neutral', 4: 'Good', 5: 'Very good' },
+  pt: { 1: 'Muito baixo', 2: 'Baixo', 3: 'Neutro', 4: 'Bem', 5: 'Muito bem' },
+};
+
 export const MOOD_EMOJI: Record<number, string> = {
   1: '😞',
   2: '😕',

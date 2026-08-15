@@ -1,4 +1,7 @@
 import { useState, type CSSProperties } from 'react';
+import { useT } from './lib/i18n';
+import LanguageSelector from './LanguageSelector';
+import strings from './WelcomeScreen.i18n';
 
 interface Props {
   onEnter: () => void;
@@ -6,6 +9,7 @@ interface Props {
 
 export default function WelcomeScreen({ onEnter }: Props) {
   const [leaving, setLeaving] = useState(false);
+  const t = useT(strings);
 
   function handleEnter() {
     setLeaving(true);
@@ -25,13 +29,17 @@ export default function WelcomeScreen({ onEnter }: Props) {
         ))}
       </div>
 
+      <div className="entry-lang anim-fade-slow">
+        <LanguageSelector compact dark />
+      </div>
+
       <div className="entry-content">
         <div className="entry-brand anim-fade-slow">
           <img src="/logo-calivia.png" alt="Calivia" className="entry-logo-img" />
         </div>
 
         <p className="entry-tagline anim-slide" style={{ animationDelay: '0.4s' }}>
-          Un refugio para cuando el ruido es demasiado.
+          {t('tagline')}
         </p>
 
         <button
@@ -40,11 +48,11 @@ export default function WelcomeScreen({ onEnter }: Props) {
           onClick={handleEnter}
           type="button"
         >
-          No me siento bien ahora mismo
+          {t('enterBtn')}
         </button>
 
         <p className="entry-foot anim-fade-slow" style={{ animationDelay: '1.2s' }}>
-          Sin registros. Sin contraseñas. Solo respira y entra.
+          {t('footer')}
         </p>
       </div>
 
@@ -61,6 +69,11 @@ export default function WelcomeScreen({ onEnter }: Props) {
           transition: opacity 0.5s ease, filter 0.5s ease;
         }
         .entry-screen.leaving { opacity: 0; filter: blur(12px); pointer-events: none; }
+
+        .entry-lang {
+          position: absolute; z-index: 2;
+          top: max(16px, env(safe-area-inset-top)); right: 16px;
+        }
 
         .entry-aura {
           position: absolute; top: 50%; left: 50%;

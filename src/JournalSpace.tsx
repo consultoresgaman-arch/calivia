@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { NotebookPen, CloudRain, Gamepad2, Vibrate, Send } from 'lucide-react';
+import { useLanguage, useT } from './lib/i18n';
+import strings from './JournalSpace.i18n';
 
 interface Props {
   userId: string;
@@ -14,13 +16,14 @@ interface Reflection {
   toolReason: string;
 }
 
-const TOOL_META = {
-  sounds: { icon: CloudRain, label: 'Ir a los sonidos de anclaje' },
-  games: { icon: Gamepad2, label: 'Ir a los juegos táctiles' },
-  vibration: { icon: Vibrate, label: 'Probar el anclaje por vibración' },
-} as const;
-
 export default function JournalSpace({ userId, onOpenSounds, onOpenGames, onOpenVibration }: Props) {
+  const { lang } = useLanguage();
+  const t = useT(strings);
+  const TOOL_META = {
+    sounds: { icon: CloudRain, label: t('goToSounds') },
+    games: { icon: Gamepad2, label: t('goToGames') },
+    vibration: { icon: Vibrate, label: t('goToVibration') },
+  } as const;
   const [content, setContent] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,13 +44,13 @@ export default function JournalSpace({ userId, onOpenSounds, onOpenGames, onOpen
           'Content-Type': 'application/json',
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({ userId, content: text }),
+        body: JSON.stringify({ userId, content: text, lang }),
       });
-      if (!res.ok) throw new Error(`No se pudo procesar (${res.status})`);
+      if (!res.ok) throw new Error(t('processError', { status: res.status }));
       const json = await res.json();
       setResult({ reflection: json.reflection, suggestedTool: json.suggestedTool, toolReason: json.toolReason });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error inesperado');
+      setError(err instanceof Error ? err.message : t('unexpectedError'));
     } finally {
       setSending(false);
     }
@@ -74,8 +77,8 @@ export default function JournalSpace({ userId, onOpenSounds, onOpenGames, onOpen
       <div className="js-head">
         <div className="js-icon"><NotebookPen size={18} strokeWidth={2} /></div>
         <div>
-          <h2>Diario de Consciencia</h2>
-          <p>Escribe de corrido lo que te abruma. Sin editarte, sin filtro.</p>
+          <h2>{t('title')}</h2>
+          <p>{t('subtitle')}</p>
         </div>
       </div>
 
@@ -84,13 +87,13 @@ export default function JournalSpace({ userId, onOpenSounds, onOpenGames, onOpen
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Suéltalo aquí, como venga…"
+            placeholder={t('placeholder')}
             rows={7}
             disabled={sending}
           />
           {error && <div className="js-error">{error}</div>}
           <button type="submit" className="js-submit" disabled={sending || !content.trim()}>
-            {sending ? 'Leyendo lo que escribiste…' : (<><Send size={15} strokeWidth={2} /><span>Soltarlo</span></>)}
+            {sending ? t('reading') : (<><Send size={15} strokeWidth={2} /><span>{t('submit')}</span></>)}
           </button>
         </form>
       ) : (
@@ -104,7 +107,7 @@ export default function JournalSpace({ userId, onOpenSounds, onOpenGames, onOpen
               </button>
             </div>
           )}
-          <button type="button" className="js-again" onClick={startOver}>Escribir algo más</button>
+          <button type="button" className="js-again" onClick={startOver}>{t('writeMore')}</button>
         </div>
       )}
 

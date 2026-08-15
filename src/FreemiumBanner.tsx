@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Sparkles, X, Zap, Brain, MessageCircle, Music, Gamepad2, TrendingUp, Headphones } from 'lucide-react';
 import { isCheckoutConfigured, openCheckout } from './lib/payments';
+import { useT } from './lib/i18n';
+import strings from './FreemiumBanner.i18n';
 
 interface Props {
   messagesToday: number;
@@ -11,53 +13,24 @@ interface Props {
 
 interface Benefit {
   icon: typeof Brain;
-  title: string;
-  desc: string;
+  titleKey: 'benefit1Title' | 'benefit2Title' | 'benefit3Title' | 'benefit4Title' | 'benefit5Title' | 'benefit6Title';
+  descKey: 'benefit1Desc' | 'benefit2Desc' | 'benefit3Desc' | 'benefit4Desc' | 'benefit5Desc' | 'benefit6Desc';
   accent: string;
 }
 
 const BENEFITS: Benefit[] = [
-  {
-    icon: Brain,
-    title: 'Memoria Profunda de la IA',
-    desc: 'La IA recuerda patrones, temas pendientes y tu evolución sin reiniciar de cero cada día.',
-    accent: 'rgba(112,130,56,0.12)',
-  },
-  {
-    icon: MessageCircle,
-    title: 'Conversación Ilimitada 24/7',
-    desc: 'Cero topes ni bloqueos diarios en tu espacio de descarga y acompañamiento socrático.',
-    accent: 'rgba(140,138,126,0.12)',
-  },
-  {
-    icon: Music,
-    title: 'Biblioteca Completa de Sonidos',
-    desc: 'Acceso a todos los ambientes de relajación: lluvia fina, latidos, viento blanco.',
-    accent: 'rgba(168,184,126,0.15)',
-  },
-  {
-    icon: Gamepad2,
-    title: 'Zona de Desconexión Total',
-    desc: 'Desbloqueo absoluto de todos los mini-juegos interactivos para frenar la rumiación.',
-    accent: 'rgba(229,217,182,0.25)',
-  },
-  {
-    icon: TrendingUp,
-    title: 'Espejo de Evolución',
-    desc: 'Panel privado con reportes y estadísticas de tus avances y bucles de comportamiento.',
-    accent: 'rgba(112,130,56,0.12)',
-  },
-  {
-    icon: Headphones,
-    title: 'Cápsulas y Prioridad',
-    desc: 'Audios exclusivos del especialista y ventajas directas en la agenda de la consulta.',
-    accent: 'rgba(140,138,126,0.12)',
-  },
+  { icon: Brain, titleKey: 'benefit1Title', descKey: 'benefit1Desc', accent: 'rgba(112,130,56,0.12)' },
+  { icon: MessageCircle, titleKey: 'benefit2Title', descKey: 'benefit2Desc', accent: 'rgba(140,138,126,0.12)' },
+  { icon: Music, titleKey: 'benefit3Title', descKey: 'benefit3Desc', accent: 'rgba(168,184,126,0.15)' },
+  { icon: Gamepad2, titleKey: 'benefit4Title', descKey: 'benefit4Desc', accent: 'rgba(229,217,182,0.25)' },
+  { icon: TrendingUp, titleKey: 'benefit5Title', descKey: 'benefit5Desc', accent: 'rgba(112,130,56,0.12)' },
+  { icon: Headphones, titleKey: 'benefit6Title', descKey: 'benefit6Desc', accent: 'rgba(140,138,126,0.12)' },
 ];
 
 export default function FreemiumBanner({ messagesToday, maxFree, userId, name }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const t = useT(strings);
 
   if (dismissed) return null;
   const remaining = Math.max(0, maxFree - messagesToday);
@@ -74,22 +47,22 @@ export default function FreemiumBanner({ messagesToday, maxFree, userId, name }:
           onKeyDown={(e) => { if (e.key === 'Enter') setExpanded(true); }}>
           <div className="fm-badge">
             <Sparkles size={14} strokeWidth={2} />
-            <span>Versión Calma</span>
+            <span>{t('badge')}</span>
           </div>
           <span className="fm-limit">
             {remaining > 0
-              ? `${remaining} mensaje${remaining === 1 ? '' : 's'} disponible${remaining === 1 ? '' : 's'} hoy`
-              : 'Límite diario alcanzado'}
+              ? t(remaining === 1 ? 'messagesAvailableOne' : 'messagesAvailableMany', { n: remaining })
+              : t('limitReached')}
           </span>
           <div className="fm-progress">
             <div className="fm-progress-fill" style={{ width: `${pct}%` }} />
           </div>
           <button className="fm-upgrade-btn" type="button" onClick={(e) => { e.stopPropagation(); setExpanded(true); }}>
             <Zap size={13} strokeWidth={2.5} />
-            <span>Calivia Ilimitada</span>
+            <span>{t('upgradeBtn')}</span>
           </button>
         </div>
-        <button className="fm-dismiss" onClick={() => setDismissed(true)} aria-label="Cerrar aviso" type="button">
+        <button className="fm-dismiss" onClick={() => setDismissed(true)} aria-label={t('closeNotice')} type="button">
           <X size={15} />
         </button>
       </div>
@@ -97,7 +70,7 @@ export default function FreemiumBanner({ messagesToday, maxFree, userId, name }:
       {expanded && (
         <div className="fm-overlay" onClick={() => setExpanded(false)}>
           <div className="fm-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-            <button className="fm-close" onClick={() => setExpanded(false)} aria-label="Cerrar" type="button">
+            <button className="fm-close" onClick={() => setExpanded(false)} aria-label={t('close')} type="button">
               <X size={20} />
             </button>
 
@@ -105,13 +78,13 @@ export default function FreemiumBanner({ messagesToday, maxFree, userId, name }:
               <div className="fm-modal-icon">
                 <Sparkles size={26} strokeWidth={1.8} />
               </div>
-              <h2>Calivia Ilimitada</h2>
-              <p>Acompañamiento sin límites, para los días que más lo necesitas.</p>
+              <h2>{t('modalTitle')}</h2>
+              <p>{t('modalSubtitle')}</p>
             </div>
 
             <div className="fm-price">
               <span className="fm-amount">$8</span>
-              <span className="fm-period">USD / mes</span>
+              <span className="fm-period">{t('pricePeriod')}</span>
             </div>
 
             <div className="fm-benefit-grid">
@@ -120,15 +93,15 @@ export default function FreemiumBanner({ messagesToday, maxFree, userId, name }:
                 return (
                   <div
                     className="fm-benefit-card"
-                    key={b.title}
+                    key={b.titleKey}
                     style={{ animationDelay: `${i * 0.06}s` }}
                   >
                     <div className="fm-benefit-icon" style={{ background: b.accent }}>
                       <Icon size={20} strokeWidth={1.8} />
                     </div>
                     <div className="fm-benefit-body">
-                      <h3>{b.title}</h3>
-                      <p>{b.desc}</p>
+                      <h3>{t(b.titleKey)}</h3>
+                      <p>{t(b.descKey)}</p>
                     </div>
                   </div>
                 );
@@ -136,12 +109,12 @@ export default function FreemiumBanner({ messagesToday, maxFree, userId, name }:
             </div>
 
             <button className="fm-cta" type="button" onClick={goToCheckout} disabled={!isCheckoutConfigured()}>
-              Comenzar mes de prueba
+              {t('ctaStart')}
             </button>
             {!isCheckoutConfigured() && (
-              <p className="fm-fine">Pasarela de pago en configuración. Vuelve pronto.</p>
+              <p className="fm-fine">{t('paymentConfiguring')}</p>
             )}
-            <p className="fm-fine">Cancela cuando quieras. Sin compromiso.</p>
+            <p className="fm-fine">{t('cancelAnytime')}</p>
           </div>
         </div>
       )}

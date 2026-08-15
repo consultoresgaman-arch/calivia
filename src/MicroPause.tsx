@@ -1,18 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles, X } from 'lucide-react';
+import { useLanguage, useT } from './lib/i18n';
+import strings, { NUDGE_MESSAGES } from './MicroPause.i18n';
 
 // Micro-pausas de consciencia: nunca basadas en racha ni en "llevas X días
 // sin entrar" — solo una invitación cálida, ocasional, y fácil de rechazar
 // sin culpa. Como mucho dos por sesión, cada vez más espaciadas.
 const NUDGE_DELAYS_MS = [18 * 60_000, 30 * 60_000];
 
-const NUDGE_MESSAGES = [
-  '¿Te tomas 10 segundos para respirar conmigo?',
-  'Llevas un rato por aquí. Una pausa corta no está de más.',
-  'Si quieres, hacemos una pequeña pausa de consciencia.',
-];
-
 export default function MicroPause() {
+  const { lang } = useLanguage();
+  const t = useT(strings);
+  const nudgeMessages = NUDGE_MESSAGES[lang];
   const [visible, setVisible] = useState(false);
   const [breathing, setBreathing] = useState(false);
   const nudgeIndexRef = useRef(0);
@@ -49,19 +48,19 @@ export default function MicroPause() {
       {!breathing ? (
         <>
           <div className="mp-toast-icon"><Sparkles size={16} strokeWidth={2} /></div>
-          <p className="mp-toast-text">{NUDGE_MESSAGES[nudgeIndexRef.current % NUDGE_MESSAGES.length]}</p>
+          <p className="mp-toast-text">{nudgeMessages[nudgeIndexRef.current % nudgeMessages.length]}</p>
           <div className="mp-toast-actions">
-            <button type="button" className="mp-yes" onClick={startBreathing}>Sí, un momento</button>
-            <button type="button" className="mp-skip" onClick={dismiss}>Ahora no</button>
+            <button type="button" className="mp-yes" onClick={startBreathing}>{t('yes')}</button>
+            <button type="button" className="mp-skip" onClick={dismiss}>{t('skip')}</button>
           </div>
         </>
       ) : (
         <div className="mp-breathe">
           <div className="mp-circle" />
-          <span>Inhala… exhala…</span>
+          <span>{t('breathe')}</span>
         </div>
       )}
-      <button className="mp-close" onClick={dismiss} type="button" aria-label="Cerrar"><X size={13} strokeWidth={2} /></button>
+      <button className="mp-close" onClick={dismiss} type="button" aria-label={t('close')}><X size={13} strokeWidth={2} /></button>
 
       <style>{`
         .mp-toast {
