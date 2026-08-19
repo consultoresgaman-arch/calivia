@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Mic, Send, Heart, Zap, Volume2 } from 'lucide-react';
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { supabase } from './lib/supabase';
 import type { ChatLog } from './lib/types';
 import { isCheckoutConfigured, openCheckout } from './lib/payments';
+import { ensureMicPermission } from './lib/micPermission';
+import { listenOnceNative, speakNative } from './lib/nativeSpeech';
 import { useLanguage, useT, localizeBackendError, type LanguageCode } from './lib/i18n';
 import strings, {
   SYSTEM_NOTE,
@@ -23,12 +25,6 @@ import strings, {
   ADVICE_TRIGGERS,
   SPEECH_LANG_TAG,
 } from './AiChat.i18n';
-
-interface MicPermissionPlugin {
-  requestMicPermission(): Promise<{ granted: boolean }>;
-}
-
-const MicPermission = registerPlugin<MicPermissionPlugin>('MicPermission');
 
 // Nombres conocidos de voces en español cálidas/femeninas de los motores de
 // alta calidad más comunes (Google, Microsoft/Edge), para preferirlas cuando
@@ -52,6 +48,7 @@ function voiceQualityScore(v: SpeechSynthesisVoice): number {
 }
 
 const VOICE_INPUT_ENABLED = true;
+const NATIVE = Capacitor.isNativePlatform();
 
 // Protocolo de espera (anti-interrupción): si el usuario sigue escribiendo
 // mensajes seguidos (mientras la IA todavía está "pensando" o apenas
@@ -171,8 +168,21 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   const limitReached = messagesSent >= maxFree;
 
   useEffect(() => {
+    // En build nativa siempre hay una vía de reconocimiento (el plugin nativo, ver
+    // lib/nativeSpeech.ts), aunque el WebView no traiga la Web Speech API del navegador (que
+    // además, aunque exista como objeto global ahí, no tiene motor real detrás — ver
+    // startVoiceInput más abajo).
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) setVoiceSupported(false);
+    if (!NATIVE && !SR) setVoiceSupported(false);
+
+    // En build nativa la respuesta hablada sale por el plugin nativo (ver speakResponse más
+    // abajo), no por window.speechSynthesis (que tampoco tiene motor real detrás del WebView
+    // embebido — mismo problema que el reconocimiento). El selector de voz de acá es
+    // específico de las voces del navegador, así que en nativo no tiene nada que cargar.
+    if (NATIVE) {
+      setVoicesLoading(false);
+      return;
+    }
 
     const synthAvailable = typeof window !== 'undefined' && 'speechSynthesis' in window;
     if (!synthAvailable) {
@@ -197,9 +207,13 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         setVoices(usable);
         if (!hasSelectedVoiceRef.current) {
           hasSelectedVoiceRef.current = true;
-          // Para español, preferimos variantes latinoamericanas cuando existan.
+          // Para español, preferimos un acento latinoamericano neutro sobre el ibérico
+          // "es-ES" — mexicano primero, luego colombiano, luego el código genérico "es-419"
+          // (Latinoamérica y el Caribe).
           const preferred = (lang === 'es'
-            ? usable.find((v) => v.lang.toLowerCase().includes('co') || v.lang.toLowerCase().includes('419'))
+            ? usable.find((v) => v.lang.toLowerCase().includes('mx'))
+              || usable.find((v) => v.lang.toLowerCase().includes('co'))
+              || usable.find((v) => v.lang.toLowerCase().includes('419'))
             : undefined) || usable[0];
           setSelectedVoiceUri(preferred.voiceURI);
         }
@@ -234,8 +248,16 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   }, [lang]);
 
   function speakResponse(text: string) {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     lastReplyRef.current = text;
+
+    if (NATIVE) {
+      void speakNative(text, SPEECH_LANG_TAG[lang]).catch((err) => {
+        console.error('[Calivia] speakResponse (nativo) falló:', err);
+      });
+      return;
+    }
+
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
@@ -306,52 +328,50 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     setRecording(false);
   }
 
-  // En Android, el WebView solo concede getUserMedia si la app ya tiene el
-  // permiso RECORD_AUDIO otorgado a nivel de sistema — si nunca se lo hemos
-  // pedido de forma nativa, el WebView lo deniega en silencio. Por eso primero
-  // pasamos por el plugin nativo (MicPermissionPlugin, ver MainActivity.java),
-  // que dispara el diálogo real de Android, y solo después llamamos a
-  // getUserMedia (que en navegadores normales es la única vía y es inofensivo).
-  async function ensureMicPermission(): Promise<boolean> {
-    if (Capacitor.isNativePlatform()) {
-      try {
-        // Si el puente nativo tarda o nunca responde, no dejamos el botón
-        // colgado esperando para siempre: a los 5s seguimos con el flujo web.
-        const timeout = new Promise<never>((_, reject) => {
-          window.setTimeout(() => reject(new Error('mic-plugin-timeout')), 5000);
-        });
-        const { granted } = await Promise.race([MicPermission.requestMicPermission(), timeout]);
-        if (!granted) return false;
-      } catch (err) {
-        console.error('[Calivia] MicPermission.requestMicPermission falló o expiró, sigo con getUserMedia como respaldo:', err);
-      }
-    }
-    if (!navigator.mediaDevices?.getUserMedia) return true;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
-      return true;
-    } catch (err) {
-      console.error('[Calivia] getUserMedia denegó el acceso al micrófono:', err);
-      return false;
-    }
-  }
-
   async function startVoiceInput() {
     if (!voiceSupported || recording) {
       stopRecognition();
       return;
     }
+    stopRecognition();
+    setError(null);
 
+    if (NATIVE) {
+      await startVoiceInputNative();
+      return;
+    }
+    await startVoiceInputWeb();
+  }
+
+  // Build nativa: el SpeechRecognizer real de Android, vía plugin (ver lib/nativeSpeech.ts) —
+  // el WebView embebido no tiene motor real detrás de la Web Speech API del navegador (esa sí
+  // sirve para pruebas de escritorio en Chrome/Edge, ver startVoiceInputWeb).
+  async function startVoiceInputNative() {
+    setRecording(true);
+    try {
+      const text = await listenOnceNative(SPEECH_LANG_TAG[lang]);
+      // Igual que en el flujo web: deja el texto transcrito en el input para que la persona
+      // lo revise y lo edite si quiere — el envío queda en sus manos, con un toque.
+      setInput(text);
+    } catch (err) {
+      console.error('[Calivia] startVoiceInputNative falló:', err);
+      const code = err instanceof Error ? err.message : '';
+      if (code === 'speech-recognition-permission-denied') setError(t('errMicPermission'));
+      else if (code === 'speech-recognition-unavailable') setError(t('errNoVoiceSupport'));
+      else if (code === 'speech-recognition-empty') { /* silencio: no hay nada que mostrar como error */ }
+      else setError(t('errTranscribeFailed'));
+    } finally {
+      setRecording(false);
+    }
+  }
+
+  async function startVoiceInputWeb() {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition as SpeechRecognitionConstructor;
     if (!SR) {
-      console.error('[Calivia] startVoiceInput: SpeechRecognition no está disponible en este navegador.');
+      console.error('[Calivia] startVoiceInputWeb: SpeechRecognition no está disponible en este navegador.');
       setError(t('errNoVoiceSupport'));
       return;
     }
-
-    stopRecognition();
-    setError(null);
 
     try {
       const micGranted = await ensureMicPermission();

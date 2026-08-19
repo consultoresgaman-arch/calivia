@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckSquare, Square, Trash2, Bell, BellOff, Plus } from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { supabase } from './lib/supabase';
 import type { TaskItem } from './lib/types';
 import { useLanguage, useT, type LanguageCode } from './lib/i18n';
+import {
+  NATIVE, SOUND_OPTIONS, DEFAULT_SOUND_KEY,
+  ensureNotificationChannels, scheduleTaskReminder, cancelTaskReminder,
+} from './lib/taskNotifications';
 import strings from './TaskManager.i18n';
 
 interface Props {
@@ -12,45 +15,8 @@ interface Props {
 }
 
 const NOTIF_SUPPORTED = typeof window !== 'undefined' && 'Notification' in window;
-const NATIVE = Capacitor.isNativePlatform();
-
-// Catálogo de tonos empaquetados en la app (android/app/src/main/res/raw/*.wav). No es un
-// selector del sonido real del celular —Android/iOS no dejan que una app de terceros use
-// tonos del sistema en notificaciones propias— así que se ofrece un puñado de tonos propios
-// para poder distinguir tareas por oído. `key` se guarda en tasks.reminder_sound.
-// Android bloquea cambiar el sonido de un canal ya creado con el mismo id, así que cada
-// tono vive en su propio canal (con su propio id) para que el sonido quede fijo desde el
-// principio y no dependa de qué canal haya quedado creado antes en el dispositivo.
-const SOUND_OPTIONS = [
-  { key: 'classic', file: 'task_alarm.wav', labelKey: 'soundClassic' as const },
-  { key: 'soft', file: 'task_alarm_soft.wav', labelKey: 'soundSoft' as const },
-  { key: 'urgent', file: 'task_alarm_urgent.wav', labelKey: 'soundUrgent' as const },
-  { key: 'chime', file: 'task_alarm_chime.wav', labelKey: 'soundChime' as const },
-];
-const DEFAULT_SOUND_KEY = SOUND_OPTIONS[0].key;
-
-function soundOption(key: string) {
-  return SOUND_OPTIONS.find((s) => s.key === key) ?? SOUND_OPTIONS[0];
-}
-
-function channelIdForSound(key: string) {
-  return `task-reminders-${soundOption(key).key}-v1`;
-}
 
 const DATE_LOCALE: Record<LanguageCode, string> = { es: 'es-CL', en: 'en-US', pt: 'pt-PT' };
-
-// Los recordatorios nativos se programan a nivel de sistema operativo (AlarmManager en
-// Android, UNUserNotificationCenter en iOS) vía @capacitor/local-notifications, así que
-// suenan aunque Calivia esté cerrada o en segundo plano. Cada tarea necesita un id numérico
-// estable para poder reprogramarla o cancelarla más tarde; como el id de la tarea es un uuid,
-// lo convertimos a un entero de 31 bits con un hash simple y determinista.
-function notifIdFromTaskId(id: string): number {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash) || 1;
-}
 
 function formatDue(dueAt: string, lang: LanguageCode, todayLabel: string, tomorrowLabel: string): string {
   const d = new Date(dueAt);
@@ -86,17 +52,7 @@ export default function TaskManager({ userId }: Props) {
   // no se puede cambiar después de creado) y se revisa si el permiso ya fue otorgado antes.
   useEffect(() => {
     if (!NATIVE) return;
-    for (const s of SOUND_OPTIONS) {
-      LocalNotifications.createChannel({
-        id: channelIdForSound(s.key),
-        name: `Recordatorios de tareas · ${s.key}`,
-        description: 'Avisos de tareas con hora programada',
-        importance: 5,
-        visibility: 1,
-        vibration: true,
-        sound: s.file,
-      }).catch(() => { /* ignore */ });
-    }
+    ensureNotificationChannels();
     LocalNotifications.checkPermissions().then((p) => setNativeNotifGranted(p.display === 'granted'));
   }, []);
 
@@ -148,25 +104,7 @@ export default function TaskManager({ userId }: Props) {
     (async () => {
       for (const t of tasks) {
         if (cancelled) return;
-        const id = notifIdFromTaskId(t.id);
-        const dueMs = t.due_at ? new Date(t.due_at).getTime() : null;
-        if (!t.done && dueMs && dueMs > Date.now()) {
-          const sound = soundOption(t.reminder_sound);
-          try {
-            await LocalNotifications.schedule({
-              notifications: [{
-                id,
-                title: tr('reminderTitle'),
-                body: t.title,
-                channelId: channelIdForSound(sound.key),
-                sound: sound.file,
-                schedule: { at: new Date(dueMs), allowWhileIdle: true },
-              }],
-            });
-          } catch { /* ignore */ }
-        } else {
-          try { await LocalNotifications.cancel({ notifications: [{ id }] }); } catch { /* ignore */ }
-        }
+        await scheduleTaskReminder(t, tr('reminderTitle'));
       }
     })();
     return () => { cancelled = true; };
@@ -215,9 +153,7 @@ export default function TaskManager({ userId }: Props) {
   async function removeTask(id: string) {
     setTasks((prev) => prev.filter((x) => x.id !== id));
     await supabase.from('tasks').delete().eq('id', id);
-    if (NATIVE) {
-      try { await LocalNotifications.cancel({ notifications: [{ id: notifIdFromTaskId(id) }] }); } catch { /* ignore */ }
-    }
+    await cancelTaskReminder(id);
   }
 
   return (

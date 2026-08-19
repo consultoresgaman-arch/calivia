@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Acceso directo estático "Programar por voz": aparece al mantener presionado el ícono de
+  Calivia en la pantalla de inicio. El intent apunta directo a MainActivity con una URL
+  propia (esquema calivia://) que @capacitor/app expone del lado JS vía getLaunchUrl()
+  (arranque en frío) y el evento appUrlOpen (app ya abierta) — ver src/lib/voiceShortcut.ts.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="voice_task"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_voice_task_short_label"
+        android:shortcutLongLabel="@string/shortcut_voice_task_long_label">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.calivia.app"
+            android:targetClass="com.calivia.app.MainActivity"
+            android:data="calivia://open/voice-task" />
+    </shortcut>
+</shortcuts>

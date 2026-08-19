@@ -17,7 +17,9 @@ import JournalSpace from './JournalSpace';
 import MicroPause from './MicroPause';
 import DailySpark from './DailySpark';
 import ProfileSettingsModal from './ProfileSettingsModal';
+import VoiceTaskCommand from './VoiceTaskCommand';
 import { useT } from './lib/i18n';
+import { initVoiceShortcut, voiceShortcutReady, wasLaunchedFromVoiceShortcut, onVoiceShortcutReopen } from './lib/voiceShortcut';
 import strings from './PatientDashboard.i18n';
 
 const MAX_FREE_MESSAGES = 20;
@@ -32,6 +34,12 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const { profile, signOut } = useAuth();
   const t = useT(strings);
   const [section, setSection] = useState<Section>('chat');
+  // Atajo nativo de app "Programar por voz" (mantener presionado el ícono → ver
+  // android/app/src/main/res/xml/shortcuts.xml). Cada vez que este contador sube, le decimos
+  // a VoiceTaskCommand que abra el panel y arranque a escuchar de una — tanto en el arranque
+  // en frío (la app recién abrió por el shortcut) como si la persona vuelve a tocarlo con
+  // Calivia ya corriendo.
+  const [voiceShortcutTrigger, setVoiceShortcutTrigger] = useState(0);
   const [messagesSent, setMessagesSent] = useState(0);
   const [sosOpen, setSosOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
@@ -50,6 +58,22 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const isPremium = !!profile?.is_premium;
   const maxFree = isPremium ? Infinity : MAX_FREE_MESSAGES;
   const calmSpace = useHeartbeatSound();
+
+  useEffect(() => {
+    let active = true;
+    initVoiceShortcut();
+    voiceShortcutReady().then(() => {
+      if (active && wasLaunchedFromVoiceShortcut()) {
+        setSection('tasks');
+        setVoiceShortcutTrigger((n) => n + 1);
+      }
+    });
+    const stopListening = onVoiceShortcutReopen(() => {
+      setSection('tasks');
+      setVoiceShortcutTrigger((n) => n + 1);
+    });
+    return () => { active = false; stopListening(); };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -304,6 +328,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
       </main>
 
       <MicroPause />
+      <VoiceTaskCommand userId={profile!.id} autoStartTrigger={voiceShortcutTrigger} />
 
       <div className="sos-dock">
         <button className={`calm-fab ${calmSpace.playing ? 'active' : ''}`} onClick={calmSpace.toggle} type="button">
