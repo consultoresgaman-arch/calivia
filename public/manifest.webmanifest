@@ -1,7 +1,7 @@
 {
-  "name": "Café con RS | Bitácora",
-  "short_name": "Café con RS",
-  "description": "Bitácora de acompañamiento psicológico con registro de ánimo, chat de IA y reportes terapéuticos.",
+  "name": "Calivia · Refugio emocional",
+  "short_name": "Calivia",
+  "description": "Espacio de acompañamiento emocional con chat de IA, seguimiento de ánimo y apoyo profesional.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
