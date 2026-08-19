@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckSquare, Square, Trash2, Bell, BellOff, Plus } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { supabase } from './lib/supabase';
 import type { TaskItem } from './lib/types';
 import { useLanguage, useT, type LanguageCode } from './lib/i18n';
@@ -10,8 +12,28 @@ interface Props {
 }
 
 const NOTIF_SUPPORTED = typeof window !== 'undefined' && 'Notification' in window;
+const NATIVE = Capacitor.isNativePlatform();
+// "v2" porque Android bloquea cambiar el sonido de un canal ya creado con otro id: si el
+// canal 'task-reminders' quedó creado con el tono por defecto en un dispositivo, hay que usar
+// un id nuevo para que tome el sonido de alarma personalizado.
+const REMINDER_CHANNEL_ID = 'task-reminders-v2';
+// Archivo en android/app/src/main/res/raw/task_alarm.wav (sin extensión al referenciarlo).
+const REMINDER_SOUND = 'task_alarm.wav';
 
 const DATE_LOCALE: Record<LanguageCode, string> = { es: 'es-CL', en: 'en-US', pt: 'pt-PT' };
+
+// Los recordatorios nativos se programan a nivel de sistema operativo (AlarmManager en
+// Android, UNUserNotificationCenter en iOS) vía @capacitor/local-notifications, así que
+// suenan aunque Calivia esté cerrada o en segundo plano. Cada tarea necesita un id numérico
+// estable para poder reprogramarla o cancelarla más tarde; como el id de la tarea es un uuid,
+// lo convertimos a un entero de 31 bits con un hash simple y determinista.
+function notifIdFromTaskId(id: string): number {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) || 1;
+}
 
 function formatDue(dueAt: string, lang: LanguageCode, todayLabel: string, tomorrowLabel: string): string {
   const d = new Date(dueAt);
@@ -37,8 +59,26 @@ export default function TaskManager({ userId }: Props) {
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
     NOTIF_SUPPORTED ? Notification.permission : 'denied'
   );
+  const [nativeNotifGranted, setNativeNotifGranted] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const notifiedRef = useRef<Set<string>>(new Set());
+
+  // Al entrar en un dispositivo nativo, se crea el canal de notificaciones (Android 8+ lo
+  // exige para poder sonar/vibrar) y se revisa si el permiso de notificaciones ya fue
+  // otorgado en una sesión anterior.
+  useEffect(() => {
+    if (!NATIVE) return;
+    LocalNotifications.createChannel({
+      id: REMINDER_CHANNEL_ID,
+      name: 'Recordatorios de tareas',
+      description: 'Avisos de tareas con hora programada',
+      importance: 5,
+      visibility: 1,
+      vibration: true,
+      sound: REMINDER_SOUND,
+    }).catch(() => { /* ignore */ });
+    LocalNotifications.checkPermissions().then((p) => setNativeNotifGranted(p.display === 'granted'));
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -57,16 +97,17 @@ export default function TaskManager({ userId }: Props) {
     return () => { mounted = false; };
   }, [userId]);
 
-  // Reloj propio: re-evalúa cada 20s qué tareas están vencidas para resaltarlas
-  // y, si hay permiso, disparar una notificación. Solo funciona con la app
-  // abierta en el navegador — no hay push del lado servidor todavía.
+  // Reloj propio: re-evalúa cada 20s qué tareas están vencidas para resaltarlas en pantalla.
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 20000);
     return () => clearInterval(interval);
   }, []);
 
+  // Recordatorio en la pestaña del navegador (solo sirve con la app abierta ahí mismo).
+  // En apps nativas (Android/iOS) esto no se usa: los recordatorios reales van por
+  // @capacitor/local-notifications, ver el efecto de reconciliación más abajo.
   useEffect(() => {
-    if (notifPermission !== 'granted') return;
+    if (NATIVE || notifPermission !== 'granted') return;
     for (const t of tasks) {
       if (t.done || !t.due_at || notifiedRef.current.has(t.id)) continue;
       if (new Date(t.due_at).getTime() <= now) {
@@ -76,10 +117,49 @@ export default function TaskManager({ userId }: Props) {
     }
   }, [now, tasks, notifPermission]);
 
+  // Reconciliación de alarmas nativas: cada vez que cambia la lista de tareas (se agrega,
+  // se completa, se reasigna una hora, o simplemente se recarga la app), se reprograma una
+  // notificación de sistema para cada tarea pendiente con hora futura, y se cancela la de
+  // cualquier tarea ya hecha o sin hora. Programar de nuevo con el mismo id simplemente
+  // reemplaza la alarma anterior, así que es seguro repetirlo.
+  useEffect(() => {
+    if (!NATIVE || !nativeNotifGranted) return;
+    let cancelled = false;
+    (async () => {
+      for (const t of tasks) {
+        if (cancelled) return;
+        const id = notifIdFromTaskId(t.id);
+        const dueMs = t.due_at ? new Date(t.due_at).getTime() : null;
+        if (!t.done && dueMs && dueMs > Date.now()) {
+          try {
+            await LocalNotifications.schedule({
+              notifications: [{
+                id,
+                title: tr('reminderTitle'),
+                body: t.title,
+                channelId: REMINDER_CHANNEL_ID,
+                sound: REMINDER_SOUND,
+                schedule: { at: new Date(dueMs), allowWhileIdle: true },
+              }],
+            });
+          } catch { /* ignore */ }
+        } else {
+          try { await LocalNotifications.cancel({ notifications: [{ id }] }); } catch { /* ignore */ }
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tasks, nativeNotifGranted]);
+
   const pending = useMemo(() => tasks.filter((t) => !t.done), [tasks]);
   const done = useMemo(() => tasks.filter((t) => t.done), [tasks]);
 
   async function requestNotifPermission() {
+    if (NATIVE) {
+      const p = await LocalNotifications.requestPermissions();
+      setNativeNotifGranted(p.display === 'granted');
+      return;
+    }
     if (!NOTIF_SUPPORTED) return;
     const perm = await Notification.requestPermission();
     setNotifPermission(perm);
@@ -113,6 +193,9 @@ export default function TaskManager({ userId }: Props) {
   async function removeTask(id: string) {
     setTasks((prev) => prev.filter((x) => x.id !== id));
     await supabase.from('tasks').delete().eq('id', id);
+    if (NATIVE) {
+      try { await LocalNotifications.cancel({ notifications: [{ id: notifIdFromTaskId(id) }] }); } catch { /* ignore */ }
+    }
   }
 
   return (
@@ -125,17 +208,30 @@ export default function TaskManager({ userId }: Props) {
         </div>
       </div>
 
-      {NOTIF_SUPPORTED && notifPermission !== 'granted' && (
-        <button className="tk-notif-btn" onClick={requestNotifPermission} type="button">
-          <Bell size={14} strokeWidth={2} />
-          <span>{tr('enableReminders')}</span>
-        </button>
-      )}
-      {!NOTIF_SUPPORTED && (
-        <div className="tk-notif-note"><BellOff size={13} strokeWidth={2} /><span>{tr('noNotifSupport')}</span></div>
-      )}
-      {NOTIF_SUPPORTED && notifPermission === 'granted' && (
-        <p className="tk-notif-hint">{tr('notifHint')}</p>
+      {NATIVE ? (
+        !nativeNotifGranted ? (
+          <button className="tk-notif-btn" onClick={requestNotifPermission} type="button">
+            <Bell size={14} strokeWidth={2} />
+            <span>{tr('enableReminders')}</span>
+          </button>
+        ) : (
+          <p className="tk-notif-hint">{tr('notifHintNative')}</p>
+        )
+      ) : (
+        <>
+          {NOTIF_SUPPORTED && notifPermission !== 'granted' && (
+            <button className="tk-notif-btn" onClick={requestNotifPermission} type="button">
+              <Bell size={14} strokeWidth={2} />
+              <span>{tr('enableReminders')}</span>
+            </button>
+          )}
+          {!NOTIF_SUPPORTED && (
+            <div className="tk-notif-note"><BellOff size={13} strokeWidth={2} /><span>{tr('noNotifSupport')}</span></div>
+          )}
+          {NOTIF_SUPPORTED && notifPermission === 'granted' && (
+            <p className="tk-notif-hint">{tr('notifHint')}</p>
+          )}
+        </>
       )}
 
       <form className="tk-form" onSubmit={addTask}>
