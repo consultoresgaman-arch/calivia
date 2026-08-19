@@ -13,12 +13,29 @@ interface Props {
 
 const NOTIF_SUPPORTED = typeof window !== 'undefined' && 'Notification' in window;
 const NATIVE = Capacitor.isNativePlatform();
-// "v2" porque Android bloquea cambiar el sonido de un canal ya creado con otro id: si el
-// canal 'task-reminders' quedó creado con el tono por defecto en un dispositivo, hay que usar
-// un id nuevo para que tome el sonido de alarma personalizado.
-const REMINDER_CHANNEL_ID = 'task-reminders-v2';
-// Archivo en android/app/src/main/res/raw/task_alarm.wav (sin extensión al referenciarlo).
-const REMINDER_SOUND = 'task_alarm.wav';
+
+// Catálogo de tonos empaquetados en la app (android/app/src/main/res/raw/*.wav). No es un
+// selector del sonido real del celular —Android/iOS no dejan que una app de terceros use
+// tonos del sistema en notificaciones propias— así que se ofrece un puñado de tonos propios
+// para poder distinguir tareas por oído. `key` se guarda en tasks.reminder_sound.
+// Android bloquea cambiar el sonido de un canal ya creado con el mismo id, así que cada
+// tono vive en su propio canal (con su propio id) para que el sonido quede fijo desde el
+// principio y no dependa de qué canal haya quedado creado antes en el dispositivo.
+const SOUND_OPTIONS = [
+  { key: 'classic', file: 'task_alarm.wav', labelKey: 'soundClassic' as const },
+  { key: 'soft', file: 'task_alarm_soft.wav', labelKey: 'soundSoft' as const },
+  { key: 'urgent', file: 'task_alarm_urgent.wav', labelKey: 'soundUrgent' as const },
+  { key: 'chime', file: 'task_alarm_chime.wav', labelKey: 'soundChime' as const },
+];
+const DEFAULT_SOUND_KEY = SOUND_OPTIONS[0].key;
+
+function soundOption(key: string) {
+  return SOUND_OPTIONS.find((s) => s.key === key) ?? SOUND_OPTIONS[0];
+}
+
+function channelIdForSound(key: string) {
+  return `task-reminders-${soundOption(key).key}-v1`;
+}
 
 const DATE_LOCALE: Record<LanguageCode, string> = { es: 'es-CL', en: 'en-US', pt: 'pt-PT' };
 
@@ -55,6 +72,7 @@ export default function TaskManager({ userId }: Props) {
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [dueInput, setDueInput] = useState('');
+  const [soundChoice, setSoundChoice] = useState(DEFAULT_SOUND_KEY);
   const [adding, setAdding] = useState(false);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
     NOTIF_SUPPORTED ? Notification.permission : 'denied'
@@ -63,20 +81,22 @@ export default function TaskManager({ userId }: Props) {
   const [now, setNow] = useState(() => Date.now());
   const notifiedRef = useRef<Set<string>>(new Set());
 
-  // Al entrar en un dispositivo nativo, se crea el canal de notificaciones (Android 8+ lo
-  // exige para poder sonar/vibrar) y se revisa si el permiso de notificaciones ya fue
-  // otorgado en una sesión anterior.
+  // Al entrar en un dispositivo nativo, se crea un canal de notificaciones por cada tono
+  // disponible (Android 8+ exige un canal para poder sonar/vibrar, y el sonido de un canal
+  // no se puede cambiar después de creado) y se revisa si el permiso ya fue otorgado antes.
   useEffect(() => {
     if (!NATIVE) return;
-    LocalNotifications.createChannel({
-      id: REMINDER_CHANNEL_ID,
-      name: 'Recordatorios de tareas',
-      description: 'Avisos de tareas con hora programada',
-      importance: 5,
-      visibility: 1,
-      vibration: true,
-      sound: REMINDER_SOUND,
-    }).catch(() => { /* ignore */ });
+    for (const s of SOUND_OPTIONS) {
+      LocalNotifications.createChannel({
+        id: channelIdForSound(s.key),
+        name: `Recordatorios de tareas · ${s.key}`,
+        description: 'Avisos de tareas con hora programada',
+        importance: 5,
+        visibility: 1,
+        vibration: true,
+        sound: s.file,
+      }).catch(() => { /* ignore */ });
+    }
     LocalNotifications.checkPermissions().then((p) => setNativeNotifGranted(p.display === 'granted'));
   }, []);
 
@@ -131,14 +151,15 @@ export default function TaskManager({ userId }: Props) {
         const id = notifIdFromTaskId(t.id);
         const dueMs = t.due_at ? new Date(t.due_at).getTime() : null;
         if (!t.done && dueMs && dueMs > Date.now()) {
+          const sound = soundOption(t.reminder_sound);
           try {
             await LocalNotifications.schedule({
               notifications: [{
                 id,
                 title: tr('reminderTitle'),
                 body: t.title,
-                channelId: REMINDER_CHANNEL_ID,
-                sound: REMINDER_SOUND,
+                channelId: channelIdForSound(sound.key),
+                sound: sound.file,
                 schedule: { at: new Date(dueMs), allowWhileIdle: true },
               }],
             });
@@ -174,12 +195,13 @@ export default function TaskManager({ userId }: Props) {
       const due_at = dueInput ? new Date(dueInput).toISOString() : null;
       const { data } = await supabase
         .from('tasks')
-        .insert({ user_id: userId, title: t, due_at })
+        .insert({ user_id: userId, title: t, due_at, reminder_sound: soundChoice })
         .select()
         .single();
       if (data) setTasks((prev) => [...prev, data]);
       setTitle('');
       setDueInput('');
+      setSoundChoice(DEFAULT_SOUND_KEY);
     } finally {
       setAdding(false);
     }
@@ -248,6 +270,18 @@ export default function TaskManager({ userId }: Props) {
           onChange={(e) => setDueInput(e.target.value)}
           aria-label={tr('reminderTimeAriaLabel')}
         />
+        {dueInput && (
+          <select
+            className="tk-sound-select"
+            value={soundChoice}
+            onChange={(e) => setSoundChoice(e.target.value)}
+            aria-label={tr('soundAriaLabel')}
+          >
+            {SOUND_OPTIONS.map((s) => (
+              <option key={s.key} value={s.key}>{tr(s.labelKey)}</option>
+            ))}
+          </select>
+        )}
         <button type="submit" className="tk-add-btn" disabled={adding || !title.trim()}>
           <Plus size={18} strokeWidth={2.5} />
         </button>
@@ -315,6 +349,8 @@ export default function TaskManager({ userId }: Props) {
         .tk-form input[type="text"] { flex: 1 1 160px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
         .tk-form input[type="datetime-local"] { flex: 1 1 150px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-size: 13px; color: var(--text-soft); }
         .tk-form input:focus { border-color: var(--primary); outline: none; }
+        .tk-sound-select { flex: 1 1 130px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-size: 13px; color: var(--text-soft); }
+        .tk-sound-select:focus { border-color: var(--primary); outline: none; }
         .tk-add-btn { width: 42px; height: 42px; border: none; border-radius: 50%; background: var(--primary); color: #fff; cursor: pointer; display: grid; place-items: center; flex-shrink: 0; transition: transform 0.12s; }
         .tk-add-btn:hover:not(:disabled) { transform: scale(1.05); }
         .tk-add-btn:disabled { opacity: 0.45; cursor: not-allowed; }

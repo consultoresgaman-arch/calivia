@@ -63,6 +63,7 @@ export interface TaskItem {
   done: boolean;
   created_at: string;
   assigned_by: string | null;
+  reminder_sound: string;
 }
 
 export interface AiReport {
