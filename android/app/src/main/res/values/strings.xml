@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Calivia</string>
+    <string name="title_activity_main">Calivia</string>
+    <string name="package_name">com.calivia.app</string>
+    <string name="custom_url_scheme">com.calivia.app</string>
+</resources>

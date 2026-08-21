@@ -1,0 +1,63 @@
+name: Build iOS App (Simulator)
+
+# Manual trigger only: macOS runners cost far more Actions minutes than
+# Linux ones, so we don't want this firing on every push.
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the web app
+        run: npm run build
+
+      - name: Sync into the iOS native project
+        run: npx cap sync ios
+
+      # No code signing here on purpose: signing for a REAL iPhone requires
+      # an Apple Developer account (free or the $99/yr paid one) and its
+      # certificates/provisioning profile as repo secrets — Apple, not this
+      # workflow, is what gates that. This step only proves the app compiles
+      # and produces a build that runs in the iOS Simulator (Mac-only), so
+      # it's a useful sanity check but NOT an installable file for a phone.
+      - name: Build for the iOS Simulator (no signing)
+        run: |
+          cd ios/App
+          xcodebuild \
+            -project App.xcodeproj \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Upload the simulator build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Calivia-iOS-Simulator-Build
+          path: ios/App/build/Build/Products/Debug-iphonesimulator/App.app
+
+# --- To go further: a build installable on a REAL iPhone ---
+# You need an Apple Developer account (developer.apple.com) — free accounts
+# can sign apps for your own registered devices for 7 days at a time; the
+# paid $99/yr account allows TestFlight and longer-lived installs. Either
+# way you'd add these as GitHub secrets and a signing step:
+#   - APPLE_CERTIFICATE (a .p12 export of your signing certificate)
+#   - APPLE_CERTIFICATE_PASSWORD
+#   - APPLE_PROVISIONING_PROFILE
+#   - A `xcodebuild ... -sdk iphoneos archive` + `exportArchive` step using
+#     an ExportOptions.plist referencing your team ID
+# This is the one part of the whole pipeline that's gated by Apple's rules,
+# not by tooling — no CI provider (this one, Codemagic, Bitrise, etc.) can
+# skip it.
