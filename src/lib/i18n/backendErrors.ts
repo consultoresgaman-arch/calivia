@@ -44,6 +44,11 @@ const BACKEND_ERRORS: Record<string, Record<LanguageCode, string>> = {
     en: 'Invalid or expired code',
     pt: 'Código inválido ou expirado',
   },
+  'La contraseña actual es incorrecta': {
+    es: 'La contraseña actual es incorrecta',
+    en: 'Current password is incorrect',
+    pt: 'A senha atual está incorreta',
+  },
 };
 
 export function localizeBackendError(message: string, lang: LanguageCode): string {

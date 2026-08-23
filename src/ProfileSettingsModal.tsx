@@ -3,7 +3,7 @@ import { X, Camera, Loader2 } from 'lucide-react';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
 import { uploadAvatar, getAvatarSignedUrl } from './lib/avatar';
-import { useT } from './lib/i18n';
+import { useT, useLanguage, localizeBackendError } from './lib/i18n';
 import LanguageSelector from './LanguageSelector';
 import strings from './ProfileSettingsModal.i18n';
 
@@ -15,6 +15,7 @@ interface Props {
 export default function ProfileSettingsModal({ open, onClose }: Props) {
   const { profile, refreshProfile } = useAuth();
   const t = useT(strings);
+  const { lang } = useLanguage();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -24,6 +25,13 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
   const [bio, setBio] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const isPsychologist = profile?.role === 'psychologist';
 
@@ -37,6 +45,11 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     setLicenseNumber(profile.license_number ?? '');
     setBio(profile.bio ?? '');
     setMessage(null);
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setPasswordMessage(null);
+    setPasswordError(null);
     getAvatarSignedUrl(profile.avatar_path).then(setAvatarUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -80,6 +93,35 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     }
   }
 
+  async function handleChangePassword() {
+    setPasswordMessage(null);
+    setPasswordError(null);
+    if (newPassword.length < 6) {
+      setPasswordError(t('passwordTooShort'));
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError(t('passwordMismatch'));
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      const { error } = await supabase.rpc('change_password', {
+        p_current_password: currentPassword,
+        p_new_password: newPassword,
+      });
+      if (error) throw error;
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordMessage(t('passwordChanged'));
+    } catch (err) {
+      setPasswordError(err instanceof Error ? localizeBackendError(err.message, lang) : t('passwordChangeFailed'));
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
   return (
     <div className="psm-overlay">
       <div className="psm-bar">
@@ -103,6 +145,32 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
         <div className="psm-field">
           <span>{t('language')}</span>
           <LanguageSelector />
+        </div>
+
+        <div className="psm-fields">
+          <h3 className="psm-subtitle">{t('changePassword')}</h3>
+          <label className="psm-field">
+            <span>{t('currentPassword')}</span>
+            <input type="password" autoComplete="current-password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+          </label>
+          <label className="psm-field">
+            <span>{t('newPassword')}</span>
+            <input type="password" autoComplete="new-password" minLength={6} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+          </label>
+          <label className="psm-field">
+            <span>{t('confirmPassword')}</span>
+            <input type="password" autoComplete="new-password" minLength={6} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+          </label>
+          {passwordError && <p className="psm-message psm-message-error">{passwordError}</p>}
+          {passwordMessage && <p className="psm-message">{passwordMessage}</p>}
+          <button
+            className="psm-save"
+            onClick={handleChangePassword}
+            disabled={changingPassword || !currentPassword || !newPassword || !confirmPassword}
+            type="button"
+          >
+            {changingPassword ? t('changingPassword') : t('changePassword')}
+          </button>
         </div>
 
         {isPsychologist && (
@@ -154,11 +222,13 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
         .psm-avatar-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
         .psm-fields { display: flex; flex-direction: column; gap: 14px; }
+        .psm-subtitle { margin: 0; font-size: 14px; color: var(--text); }
         .psm-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-soft); }
         .psm-field input, .psm-field textarea { font: inherit; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); resize: vertical; }
         .psm-field input:focus, .psm-field textarea:focus { outline: 2px solid var(--primary-200); border-color: var(--primary-200); }
 
         .psm-message { margin: 0; font-size: 13px; color: var(--primary-600); font-weight: 600; }
+        .psm-message-error { color: var(--danger); }
         .psm-save { padding: 12px; border: none; border-radius: 999px; background: var(--primary); color: #fff; font-size: 14.5px; font-weight: 700; cursor: pointer; }
         .psm-save:hover:not(:disabled) { background: var(--primary-600); }
         .psm-save:disabled { opacity: 0.6; cursor: not-allowed; }
