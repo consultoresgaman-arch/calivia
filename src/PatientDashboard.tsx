@@ -54,6 +54,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [pendingLinks, setPendingLinks] = useState<{ psychologistId: string; name: string }[]>([]);
   const [linkActionId, setLinkActionId] = useState<string | null>(null);
+  const [approvalCode, setApprovalCode] = useState<{ name: string; code: string } | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const isPremium = !!profile?.is_premium;
   const maxFree = isPremium ? Infinity : MAX_FREE_MESSAGES;
@@ -112,7 +113,14 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   async function respondToLink(psychologistId: string, accept: boolean) {
     setLinkActionId(psychologistId);
     try {
-      await supabase.rpc(accept ? 'accept_patient_link' : 'reject_patient_link', { p_psychologist_id: psychologistId });
+      if (accept) {
+        const name = pendingLinks.find((l) => l.psychologistId === psychologistId)?.name ?? t('defaultProfessional');
+        const { data, error } = await supabase.rpc('accept_patient_link', { p_psychologist_id: psychologistId }).single<{ code: string }>();
+        if (error) throw error;
+        setApprovalCode({ name, code: data.code });
+      } else {
+        await supabase.rpc('reject_patient_link', { p_psychologist_id: psychologistId });
+      }
       setPendingLinks((prev) => prev.filter((l) => l.psychologistId !== psychologistId));
     } finally {
       setLinkActionId(null);
@@ -193,6 +201,14 @@ export default function PatientDashboard({ onExitToHome }: Props) {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+                  {approvalCode && (
+                    <div className="user-menu-approval-code">
+                      <span>{t('approvalCodeTitle', { name: approvalCode.name })}</span>
+                      <strong>{approvalCode.code}</strong>
+                      <p>{t('approvalCodeHint')}</p>
+                      <button type="button" onClick={() => setApprovalCode(null)}>{t('approvalCodeDismiss')}</button>
                     </div>
                   )}
                   <button className="user-menu-edit-profile" onClick={() => { setMenuOpen(false); setProfileModalOpen(true); }} type="button">
@@ -398,6 +414,11 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         .user-menu-link-accept { background: var(--primary); color: #fff; }
         .user-menu-link-reject { background: transparent; border: 1px solid var(--border); color: var(--text-soft); }
         .user-menu-link-accept:disabled, .user-menu-link-reject:disabled { opacity: 0.6; cursor: default; }
+        .user-menu-approval-code { display: flex; flex-direction: column; gap: 4px; padding: 10px; margin-bottom: 10px; border-radius: 10px; background: rgba(112,130,56,0.1); border: 1px dashed var(--primary-200); }
+        .user-menu-approval-code > span { font-size: 12px; font-weight: 700; color: var(--text); }
+        .user-menu-approval-code strong { font-size: 22px; letter-spacing: 0.12em; color: var(--primary-600); }
+        .user-menu-approval-code p { margin: 0; font-size: 11.5px; color: var(--text-soft); line-height: 1.4; }
+        .user-menu-approval-code button { align-self: flex-start; margin-top: 2px; padding: 0; border: none; background: none; font-size: 11.5px; color: var(--text-soft); text-decoration: underline; cursor: pointer; }
         .user-menu-recovery { display: flex; flex-direction: column; gap: 4px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border-soft); }
         .user-menu-recovery > span { font-size: 12px; font-weight: 700; color: var(--text); }
         .user-menu-recovery p { margin: 0; font-size: 11px; color: var(--text-soft); line-height: 1.4; }

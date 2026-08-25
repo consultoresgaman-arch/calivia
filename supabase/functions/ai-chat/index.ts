@@ -148,7 +148,7 @@ const SYSTEM_PROMPT: Record<Lang, string> = {
     'profesional, o cuando notes que es momento de dar un paso más profundo, menciona con calidez y sin',
     'presión que puede ser buen momento para hablarlo con un psicólogo — puede ser el que ella prefiera,',
     'o agendar directamente con Rubén Salguero, el psicólogo detrás de Calivia, desde la app (sección',
-    '"Agendar sesión") o en este enlace: https://calendly.com/consultoresgaman/30min. Ofrécelo como una',
+    '"Agendar sesión") o en este enlace: https://calendly.com/consultoresgaman/60min. Ofrécelo como una',
     'opción genuina y respetuosa, nunca como una obligación ni como si la estuvieras "derivando" de',
     'forma clínica — sigue siendo su amigo mientras lo dices, no un sistema que deriva un caso.',
   ].join('\n'),
@@ -282,7 +282,7 @@ const SYSTEM_PROMPT: Record<Lang, string> = {
     'help, or you notice it is time for a deeper step, mention with warmth and no pressure that it might',
     'be a good moment to talk to a psychologist — whoever they prefer, or booking directly with Rubén',
     'Salguero, the psychologist behind Calivia, from the app ("Book a session" section) or at this link:',
-    'https://calendly.com/consultoresgaman/30min. Offer it as a genuine, respectful option, never as an',
+    'https://calendly.com/consultoresgaman/60min. Offer it as a genuine, respectful option, never as an',
     'obligation or as if you were clinically "referring a case" — stay their friend while you say it, not',
     'a system routing a ticket.',
   ].join('\n'),
@@ -424,7 +424,7 @@ const SYSTEM_PROMPT: Record<Lang, string> = {
     'pessoa pedir ajuda profissional, ou quando notar que é hora de dar um passo mais profundo, mencione',
     'com calidez e sem pressão que pode ser um bom momento para conversar com um psicólogo — o que ela',
     'preferir, ou agendar diretamente com Rubén Salguero, o psicólogo por trás do Calivia, pelo app',
-    '(seção "Agendar sessão") ou neste link: https://calendly.com/consultoresgaman/30min. Ofereça isso',
+    '(seção "Agendar sessão") ou neste link: https://calendly.com/consultoresgaman/60min. Ofereça isso',
     'como uma opção genuína e respeitosa, nunca como uma obrigação nem como se estivesse "encaminhando um',
     'caso" clinicamente — continue sendo amigo dela enquanto diz isso, não um sistema roteando um chamado.',
   ].join('\n'),
@@ -878,6 +878,103 @@ async function buildCrisisResponse(supabase: ReturnType<typeof createClient>, us
   ].join('\n\n');
 }
 
+// Sugerencia clínica breve para el profesional (NUNCA se muestra a la
+// persona en riesgo — eso sigue siendo 100% determinista, ver
+// buildCrisisResponse). Es un apoyo, no un diagnóstico ni un plan de
+// tratamiento: el profesional aplica su propio criterio.
+const TREATMENT_SUGGESTION_PROMPT = [
+  'Eres un asistente clínico que apoya a un psicólogo. Un paciente vinculado a él acaba de escribir un',
+  'mensaje que activó un detector de riesgo autolítico/suicida por palabras clave. Sugiere, en 1 a 2',
+  'frases breves y en español, un primer enfoque o siguiente paso terapéutico inmediato para que el',
+  'profesional lo considere al contactar al paciente. No diagnostiques, no des un plan de tratamiento',
+  'completo, no repitas el mensaje textual del paciente. Sé concreto y accionable (evaluación de riesgo',
+  'inmediata, contención, contacto telefónico directo, revisar red de apoyo, etc.). Responde solo con la',
+  'sugerencia, sin introducción.',
+].join(' ');
+
+async function generateTreatmentSuggestion(message: string, apiKey: string | undefined): Promise<string> {
+  const fallback = 'Contacta al paciente lo antes posible para evaluar el riesgo directamente y reforzar su red de apoyo y contactos de emergencia.';
+  if (!apiKey) return fallback;
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: TREATMENT_SUGGESTION_PROMPT },
+          { role: 'user', content: message },
+        ],
+        temperature: 0.4,
+        max_tokens: 120,
+      }),
+    });
+    if (!res.ok) return fallback;
+    const json = await res.json();
+    const text: string | undefined = json.choices?.[0]?.message?.content?.trim();
+    return text || fallback;
+  } catch (err) {
+    console.error('generateTreatmentSuggestion falló:', err);
+    return fallback;
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Best-effort: si falla, nunca debe tumbar la alerta en sí (que ya quedó
+// guardada en risk_alerts antes de llegar acá) — el correo es un aviso
+// adicional, no la fuente de verdad.
+async function sendRiskAlertEmail(params: { toEmail: string; patientName: string; reason: string; excerpt: string; suggestion: string }) {
+  const apiKey = Deno.env.get('RESEND_API_KEY');
+  if (!apiKey) {
+    console.error('sendRiskAlertEmail: RESEND_API_KEY no configurado, no se pudo avisar por correo.');
+    return;
+  }
+  const fromEmail = Deno.env.get('RESEND_FROM_EMAIL') ?? 'Calivia <onboarding@resend.dev>';
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<body style="margin:0;padding:0;background:#F5F3EE;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
+    <tr><td align="center">
+      <table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:16px;overflow:hidden;">
+        <tr><td style="padding:32px 32px 8px;">
+          <div style="width:40px;height:40px;border-radius:12px;background:#B85C4A;color:#fff;text-align:center;line-height:40px;font-size:18px;">⚠</div>
+          <h1 style="margin:16px 0 0;font-size:20px;color:#1a1d1a;">Alerta de riesgo — ${escapeHtml(params.patientName)}</h1>
+        </td></tr>
+        <tr><td style="padding:8px 32px 24px;">
+          <p style="font-size:13px;color:#8c8a7e;margin:0 0 4px;">MOTIVO</p>
+          <p style="font-size:14px;line-height:1.6;color:#3a3a36;margin:0 0 16px;">${escapeHtml(params.reason)}</p>
+          <p style="font-size:13px;color:#8c8a7e;margin:0 0 4px;">FRAGMENTO DEL MENSAJE</p>
+          <div style="margin:0 0 16px;padding:12px;background:#F5F3EE;border-radius:10px;font-size:13px;color:#3a3a36;font-style:italic;">"${escapeHtml(params.excerpt)}"</div>
+          <p style="font-size:13px;color:#8c8a7e;margin:0 0 4px;">SUGERENCIA</p>
+          <p style="font-size:14px;line-height:1.6;color:#3a3a36;margin:0 0 20px;">${escapeHtml(params.suggestion)}</p>
+          <p style="font-size:12px;color:#8c8a7e;">Abre Calivia para ver el detalle y marcar la alerta como revisada.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: fromEmail,
+        to: params.toEmail,
+        subject: `Alerta de riesgo — ${params.patientName}`,
+        html,
+        text: `Alerta de riesgo para ${params.patientName}.\n\nMotivo: ${params.reason}\n\nFragmento: "${params.excerpt}"\n\nSugerencia: ${params.suggestion}\n\nAbre Calivia para ver el detalle.`,
+      }),
+    });
+    if (!res.ok) console.error('sendRiskAlertEmail: Resend error', res.status, await res.text().catch(() => ''));
+  } catch (err) {
+    console.error('sendRiskAlertEmail falló:', err);
+  }
+}
+
 // Best-effort: si falla cualquier paso acá, no debe romper el chat.
 // El "reason" queda solo en el panel del psicólogo (en español), así que no
 // se traduce.
@@ -885,18 +982,43 @@ async function maybeCreateRiskAlert(supabase: ReturnType<typeof createClient>, u
   try {
     const matched = detectRiskKeyword(message);
     if (!matched) return;
+    // Solo un vínculo YA CONFIRMADO (con código verificado, ver
+    // 20260825170000_patient_link_invite_and_code_flow.sql) recibe alertas —
+    // una invitación todavía pendiente de aceptar/confirmar no cuenta.
     const { data: link } = await supabase
       .from('patient_links')
       .select('psychologist_id')
       .eq('patient_id', userId)
+      .eq('status', 'accepted')
       .maybeSingle();
     if (!link) return;
+
+    const reason = `Palabra clave de riesgo detectada: "${matched}"`;
+    const excerpt = message.slice(0, 200);
+    const suggestion = await generateTreatmentSuggestion(message, Deno.env.get('OPENAI_API_KEY'));
+
     await supabase.from('risk_alerts').insert({
       patient_id: userId,
       psychologist_id: link.psychologist_id,
-      reason: `Palabra clave de riesgo detectada: "${matched}"`,
-      message_excerpt: message.slice(0, 200),
+      reason,
+      message_excerpt: excerpt,
+      treatment_suggestion: suggestion,
     });
+
+    const [{ data: patientProfile }, { data: psychProfile }] = await Promise.all([
+      supabase.from('profiles').select('full_name, preferred_name').eq('id', userId).maybeSingle(),
+      supabase.from('profiles').select('recovery_email').eq('id', link.psychologist_id).maybeSingle(),
+    ]);
+
+    if (psychProfile?.recovery_email) {
+      await sendRiskAlertEmail({
+        toEmail: psychProfile.recovery_email as string,
+        patientName: (patientProfile?.preferred_name as string) || (patientProfile?.full_name as string) || 'un paciente',
+        reason,
+        excerpt,
+        suggestion,
+      });
+    }
   } catch (err) {
     console.error('maybeCreateRiskAlert failed:', err);
   }
@@ -940,9 +1062,9 @@ function pickFallback(msg: string, lang: Lang): string {
   }
   if (diagnosis[lang].some((k) => lower.includes(k))) {
     return {
-      es: 'No puedo darte un diagnóstico, pero sí acompañarte de cerca. Si quieres dar el paso con un profesional, puedes agendar acá: https://calendly.com/consultoresgaman/30min',
-      en: "I can't give you a diagnosis, but I can stay close to you. If you want to take the step with a professional, you can book here: https://calendly.com/consultoresgaman/30min",
-      pt: 'Não posso te dar um diagnóstico, mas posso te acompanhar de perto. Se quiser dar o passo com um profissional, pode agendar aqui: https://calendly.com/consultoresgaman/30min',
+      es: 'No puedo darte un diagnóstico, pero sí acompañarte de cerca. Si quieres dar el paso con un profesional, puedes agendar acá: https://calendly.com/consultoresgaman/60min',
+      en: "I can't give you a diagnosis, but I can stay close to you. If you want to take the step with a professional, you can book here: https://calendly.com/consultoresgaman/60min",
+      pt: 'Não posso te dar um diagnóstico, mas posso te acompanhar de perto. Se quiser dar o passo com um profissional, pode agendar aqui: https://calendly.com/consultoresgaman/60min',
     }[lang];
   }
   const replies = FALLBACK_REPLIES[lang];
@@ -1010,7 +1132,19 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ reply: '' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    await maybeCreateRiskAlert(supabase, userId, message);
+    // La alerta (que ahora incluye una llamada a OpenAI para la sugerencia
+    // clínica y un envío de correo) corre en segundo plano — nunca debe
+    // demorar la respuesta de crisis a la persona en riesgo, que es lo más
+    // urgente en este momento. EdgeRuntime.waitUntil (API propia del runtime
+    // de Supabase) sigue la tarea después de responder; si no está disponible
+    // (p. ej. `supabase functions serve` en local), se espera igual.
+    const riskAlertTask = maybeCreateRiskAlert(supabase, userId, message);
+    const waitUntil = (globalThis as any).EdgeRuntime?.waitUntil;
+    if (typeof waitUntil === 'function') {
+      waitUntil(riskAlertTask);
+    } else {
+      await riskAlertTask;
+    }
 
     // Protocolo de crisis: si el mensaje contiene una señal de riesgo
     // autolítico o suicida, la respuesta NUNCA se deja en manos del modelo

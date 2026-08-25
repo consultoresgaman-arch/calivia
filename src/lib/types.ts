@@ -13,14 +13,17 @@ export interface Profile {
   bio: string | null;
   preferred_name: string | null;
   occupation: string | null;
+  terms_accepted_at: string | null;
+  terms_version: string | null;
 }
 
 export interface PatientLink {
   id: string;
   psychologist_id: string;
   patient_id: string;
-  status: 'pending' | 'accepted';
+  status: 'pending' | 'code_issued' | 'accepted';
   created_at: string;
+  accepted_at: string | null;
 }
 
 export interface ClinicalNote {
@@ -53,6 +56,7 @@ export interface RiskAlert {
   psychologist_id: string;
   reason: string;
   message_excerpt: string | null;
+  treatment_suggestion: string | null;
   acknowledged: boolean;
   created_at: string;
 }

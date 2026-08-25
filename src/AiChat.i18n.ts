@@ -230,9 +230,9 @@ export const MEANING_REPLY: Record<LanguageCode, string> = {
 };
 
 export const DIAGNOSIS_REPLY: Record<LanguageCode, string> = {
-  es: 'No tengo la capacidad de dar un diagnóstico clínico, pero puedo acompañarte. Para una evaluación profesional, te invito a agendar una sesión con el especialista: https://calendly.com/consultoresgaman/30min',
-  en: "I'm not able to give a clinical diagnosis, but I can be here with you. For a professional evaluation, I invite you to book a session with the specialist: https://calendly.com/consultoresgaman/30min",
-  pt: 'Não tenho a capacidade de dar um diagnóstico clínico, mas posso te acompanhar. Para uma avaliação profissional, te convido a agendar uma sessão com o especialista: https://calendly.com/consultoresgaman/30min',
+  es: 'No tengo la capacidad de dar un diagnóstico clínico, pero puedo acompañarte. Para una evaluación profesional, te invito a agendar una sesión con el especialista: https://calendly.com/consultoresgaman/60min',
+  en: "I'm not able to give a clinical diagnosis, but I can be here with you. For a professional evaluation, I invite you to book a session with the specialist: https://calendly.com/consultoresgaman/60min",
+  pt: 'Não tenho a capacidade de dar um diagnóstico clínico, mas posso te acompanhar. Para uma avaliação profissional, te convido a agendar uma sessão com o especialista: https://calendly.com/consultoresgaman/60min',
 };
 
 export const NO_ANSWER_REPLY: Record<LanguageCode, string> = {

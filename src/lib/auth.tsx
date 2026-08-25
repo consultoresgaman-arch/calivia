@@ -30,6 +30,8 @@ interface ProfileRow {
   bio: string | null;
   preferred_name: string | null;
   occupation: string | null;
+  terms_accepted_at: string | null;
+  terms_version: string | null;
 }
 
 interface ProfileRowWithSession extends ProfileRow {
@@ -50,6 +52,8 @@ function rowToProfile(row: ProfileRow): Profile {
     bio: row.bio,
     preferred_name: row.preferred_name,
     occupation: row.occupation,
+    terms_accepted_at: row.terms_accepted_at,
+    terms_version: row.terms_version,
   };
 }
 

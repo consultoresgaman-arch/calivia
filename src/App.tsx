@@ -5,6 +5,7 @@ import AuthPage from './AuthPage';
 import PatientDashboard from './PatientDashboard';
 import TherapistDashboard from './TherapistDashboard';
 import WelcomeScreen from './WelcomeScreen';
+import TermsGate, { CURRENT_TERMS_VERSION } from './TermsGate';
 
 type Phase = 'entry' | 'auth' | 'app';
 
@@ -39,6 +40,8 @@ export default function App() {
   if (phase === 'auth' || !profile) {
     return <AuthPage />;
   }
+
+  if (profile.terms_version !== CURRENT_TERMS_VERSION) return <TermsGate />;
 
   if (profile.role === 'psychologist') return <TherapistDashboard />;
 

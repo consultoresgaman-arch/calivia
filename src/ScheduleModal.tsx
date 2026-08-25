@@ -12,7 +12,7 @@ interface Props {
   name?: string | null;
 }
 
-const CALENDLY_URL = 'https://calendly.com/consultoresgaman/30min';
+const CALENDLY_URL = 'https://calendly.com/consultoresgaman/60min';
 const CONTACT_EMAIL = 'consultoresgaman@gmail.com';
 
 function ensureCalendlyScript(onReady: () => void) {

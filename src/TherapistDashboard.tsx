@@ -5,7 +5,15 @@ import { getSessionToken } from './lib/session';
 import { useAuth } from './lib/auth';
 import { getAvatarSignedUrl } from './lib/avatar';
 import ProfileSettingsModal from './ProfileSettingsModal';
-import type { CheckIn, ChatLog, AiReport, Profile, RiskAlert, ClinicalNote } from './lib/types';
+import type { CheckIn, AiReport, Profile, RiskAlert, ClinicalNote } from './lib/types';
+
+// Solo fecha de actividad, nunca contenido — ver patient_chat_activity_dates()
+// en 20260825150000_restrict_chat_logs_to_owner_only.sql. El psicólogo puede
+// ver que su paciente conversó con Calivia un día dado, nunca qué dijo.
+interface ChatActivity {
+  user_id: string;
+  activity_date: string;
+}
 
 const DISCLAIMER =
   'La interpretación clínica final corresponde siempre al profesional. Este reporte es un apoyo analítico, no un diagnóstico.';
@@ -44,7 +52,7 @@ export default function TherapistDashboard() {
   const [reports, setReports] = useState<AiReport[]>([]);
   const [patients, setPatients] = useState<Profile[]>([]);
   const [checkins, setCheckins] = useState<CheckIn[]>([]);
-  const [chatLogs, setChatLogs] = useState<ChatLog[]>([]);
+  const [chatLogs, setChatLogs] = useState<ChatActivity[]>([]);
   const [alerts, setAlerts] = useState<RiskAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +62,11 @@ export default function TherapistDashboard() {
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linkSentMsg, setLinkSentMsg] = useState<string | null>(null);
+  const [confirmName, setConfirmName] = useState('');
+  const [confirmCode, setConfirmCode] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmSentMsg, setConfirmSentMsg] = useState<string | null>(null);
   const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
@@ -72,7 +85,9 @@ export default function TherapistDashboard() {
         supabase.from('ai_reports').select('*').order('report_date', { ascending: false }),
         supabase.from('profiles').select('*').order('created_at', { ascending: false }),
         supabase.from('checkins').select('*').order('created_at', { ascending: false }).limit(500),
-        supabase.from('chat_logs').select('*').order('created_at', { ascending: false }).limit(500),
+        // Nunca el contenido del chat, solo en qué fechas hubo actividad —
+        // ver patient_chat_activity_dates() y el comentario junto a ChatActivity.
+        supabase.rpc('patient_chat_activity_dates'),
         supabase.from('risk_alerts').select('*').order('created_at', { ascending: false }).limit(100),
       ]);
       if (!mounted) return;
@@ -201,16 +216,41 @@ export default function TherapistDashboard() {
     setLinkError(null);
     setLinkSentMsg(null);
     try {
-      const { data, error } = await supabase.rpc('link_patient', { p_name: name }).single<{ id: string; full_name: string }>();
+      const { data, error } = await supabase.rpc('invite_patient', { p_name: name }).single<{ id: string; full_name: string; status: string }>();
       if (error) throw error;
-      // El vínculo queda pendiente hasta que el paciente lo acepte desde su
-      // cuenta: recién entonces aparecerá en la lista (RLS lo exige).
-      setLinkSentMsg(`Solicitud enviada a ${data.full_name}. Aparecerá en tu lista cuando la acepte.`);
+      // El vínculo queda pendiente hasta que el paciente la acepte y te
+      // pase el código de aprobación — ver confirmLinkCode() más abajo.
+      setLinkSentMsg(`Invitación enviada a ${data.full_name}. Cuando la acepte, te dará un código para confirmar el vínculo.`);
       setLinkName('');
     } catch (err) {
-      setLinkError(err instanceof Error ? err.message : 'No se pudo vincular al paciente');
+      setLinkError(err instanceof Error ? err.message : 'No se pudo invitar al paciente');
     } finally {
       setLinking(false);
+    }
+  }
+
+  async function confirmLinkCode(e: React.FormEvent) {
+    e.preventDefault();
+    const name = confirmName.trim();
+    const code = confirmCode.trim();
+    if (!name || !code || confirming) return;
+    setConfirming(true);
+    setConfirmError(null);
+    setConfirmSentMsg(null);
+    try {
+      const { data, error } = await supabase.rpc('confirm_patient_link_code', { p_patient_name: name, p_code: code }).single<{ id: string; full_name: string }>();
+      if (error) throw error;
+      setConfirmSentMsg(`Vínculo confirmado con ${data.full_name}.`);
+      setConfirmName('');
+      setConfirmCode('');
+      // El paciente recién ahora aparece en la lista (RLS lo exige):
+      // recargamos perfiles para que se refleje sin esperar a un F5 manual.
+      const { data: pat } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+      setPatients((pat ?? []).filter((p) => p.role === 'patient'));
+    } catch (err) {
+      setConfirmError(err instanceof Error ? err.message : 'No se pudo confirmar el vínculo');
+    } finally {
+      setConfirming(false);
     }
   }
 
@@ -227,7 +267,7 @@ export default function TherapistDashboard() {
   const pendingPatients = useMemo(() => {
     const activeIds = new Set<string>();
     for (const c of checkins) { if (c.created_at.slice(0, 10) === selectedDate) activeIds.add(c.user_id); }
-    for (const c of chatLogs) { if (c.created_at.slice(0, 10) === selectedDate) activeIds.add(c.user_id); }
+    for (const c of chatLogs) { if (c.activity_date === selectedDate) activeIds.add(c.user_id); }
     const withReport = new Set(reportsForDate.map((r) => r.user_id));
     return patients.filter((p) => activeIds.has(p.id) && !withReport.has(p.id));
   }, [checkins, chatLogs, reportsForDate, patients, selectedDate]);
@@ -270,7 +310,7 @@ export default function TherapistDashboard() {
   const activeCount = useMemo(() => {
     const ids = new Set<string>();
     for (const c of checkins) { if (c.created_at.slice(0, 10) === selectedDate) ids.add(c.user_id); }
-    for (const c of chatLogs) { if (c.created_at.slice(0, 10) === selectedDate) ids.add(c.user_id); }
+    for (const c of chatLogs) { if (c.activity_date === selectedDate) ids.add(c.user_id); }
     return ids.size;
   }, [checkins, chatLogs, selectedDate]);
 
@@ -318,6 +358,7 @@ export default function TherapistDashboard() {
                       <span className="th-alert-patient">{p?.full_name || 'Paciente'}</span>
                       <span className="th-alert-reason">{a.reason}</span>
                       {a.message_excerpt && <span className="th-alert-excerpt">"{a.message_excerpt}"</span>}
+                      {a.treatment_suggestion && <span className="th-alert-suggestion"><strong>Sugerencia:</strong> {a.treatment_suggestion}</span>}
                       <span className="th-alert-time">{new Date(a.created_at).toLocaleString('es-CL')}</span>
                     </div>
                     <button className="th-ack-btn" onClick={() => acknowledgeAlert(a.id)} type="button">
@@ -335,7 +376,7 @@ export default function TherapistDashboard() {
             <div className="th-section-icon"><Users size={18} strokeWidth={2} /></div>
             <div>
               <h2>Mis pacientes</h2>
-              <p>Vincula pacientes por nombre para ver sus registros y reportes. Deben aceptar la solicitud desde su cuenta.</p>
+              <p>Invita pacientes por nombre. Deben aceptar desde su cuenta y darte el código que reciben para confirmar el vínculo.</p>
             </div>
           </div>
           <form className="th-link-form" onSubmit={linkPatient}>
@@ -347,11 +388,33 @@ export default function TherapistDashboard() {
             />
             <button type="submit" className="th-btn-primary" disabled={linking || !linkName.trim()}>
               <UserPlus size={15} strokeWidth={2} />
-              <span>{linking ? 'Vinculando…' : 'Vincular'}</span>
+              <span>{linking ? 'Invitando…' : 'Invitar'}</span>
             </button>
           </form>
           {linkError && <p className="th-link-error">{linkError}</p>}
           {linkSentMsg && <p className="th-link-sent">{linkSentMsg}</p>}
+
+          <form className="th-link-form th-confirm-form" onSubmit={confirmLinkCode}>
+            <input
+              type="text"
+              value={confirmName}
+              onChange={(e) => setConfirmName(e.target.value)}
+              placeholder="Nombre del paciente"
+            />
+            <input
+              type="text"
+              value={confirmCode}
+              onChange={(e) => setConfirmCode(e.target.value)}
+              placeholder="Código de 6 dígitos"
+              inputMode="numeric"
+              maxLength={6}
+            />
+            <button type="submit" className="th-btn-primary" disabled={confirming || !confirmName.trim() || !confirmCode.trim()}>
+              <span>{confirming ? 'Confirmando…' : 'Confirmar código'}</span>
+            </button>
+          </form>
+          {confirmError && <p className="th-link-error">{confirmError}</p>}
+          {confirmSentMsg && <p className="th-link-sent">{confirmSentMsg}</p>}
           {!loading && (
             <div className="th-patient-list">
               {patients.length === 0 ? (
@@ -579,6 +642,8 @@ export default function TherapistDashboard() {
           .th-alert-patient { font-size: 14px; font-weight: 700; color: var(--text); }
           .th-alert-reason { font-size: 12.5px; color: var(--danger); font-weight: 600; }
           .th-alert-excerpt { font-size: 12.5px; color: var(--text-soft); font-style: italic; }
+          .th-alert-suggestion { font-size: 12.5px; color: var(--text); line-height: 1.5; }
+          .th-alert-suggestion strong { color: var(--primary-600); }
           .th-alert-time { font-size: 11px; color: var(--text-muted); }
           .th-ack-btn { display: flex; align-items: center; gap: 5px; padding: 8px 14px; border: 1px solid rgba(196,91,74,0.3); border-radius: 999px; background: var(--surface); color: var(--danger); font-size: 12.5px; font-weight: 700; cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
           .th-ack-btn:hover { background: var(--danger); color: #fff; }
