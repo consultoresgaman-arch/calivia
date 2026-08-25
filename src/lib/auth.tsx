@@ -28,6 +28,8 @@ interface ProfileRow {
   phone: string | null;
   license_number: string | null;
   bio: string | null;
+  preferred_name: string | null;
+  occupation: string | null;
 }
 
 interface ProfileRowWithSession extends ProfileRow {
@@ -46,6 +48,8 @@ function rowToProfile(row: ProfileRow): Profile {
     phone: row.phone,
     license_number: row.license_number,
     bio: row.bio,
+    preferred_name: row.preferred_name,
+    occupation: row.occupation,
   };
 }
 

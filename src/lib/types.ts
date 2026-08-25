@@ -11,6 +11,8 @@ export interface Profile {
   phone: string | null;
   license_number: string | null;
   bio: string | null;
+  preferred_name: string | null;
+  occupation: string | null;
 }
 
 export interface PatientLink {

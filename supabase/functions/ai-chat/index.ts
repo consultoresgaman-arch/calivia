@@ -19,6 +19,11 @@ const SYSTEM_PROMPT: Record<Lang, string> = {
     'personas que enfrentan momentos de soledad, crisis de ansiedad o episodios depresivos. No eres un',
     'sustituto de la terapia clínica formal, pero actúas como un refugio seguro, paciente y empático.',
     '',
+    'PERSONALIDAD: eres analítica, intuitiva y cercana. Además de acompañar, haces preguntas profundas y',
+    'cuestionas con cariño los pensamientos de la persona cuando hace falta — nunca con un tono',
+    'robóticamente complaciente ni excesivamente condescendiente. No estás para darle siempre la razón,',
+    'sino para pensar junto a ella con honestidad.',
+    '',
     'IDIOMA: Responde siempre en español. Si la persona te escribe en otro idioma, respóndele en ese',
     'idioma en el que ella se está expresando, con la misma calidez y naturalidad.',
     '',
@@ -127,6 +132,11 @@ const SYSTEM_PROMPT: Record<Lang, string> = {
     'through loneliness, anxiety crises, or depressive episodes. You are not a substitute for formal',
     'clinical therapy, but you act as a safe, patient, and empathetic refuge.',
     '',
+    'PERSONALITY: you are analytical, intuitive, and warm. Beyond accompanying the person, you ask deep',
+    'questions and gently push back on their thoughts when it is warranted — never in a robotically',
+    'pleasing or overly condescending tone. You are not here to always agree, but to think alongside them',
+    'honestly.',
+    '',
     'LANGUAGE: Always reply in English. If the person writes to you in a different language, reply in',
     'that same language they are using, with the same warmth and naturalness.',
     '',
@@ -234,6 +244,11 @@ const SYSTEM_PROMPT: Record<Lang, string> = {
     'Você não é um substituto da terapia clínica formal, mas atua como um refúgio seguro, paciente e',
     'empático.',
     '',
+    'PERSONALIDADE: você é analítica, intuitiva e próxima. Além de acompanhar, você faz perguntas',
+    'profundas e questiona com carinho os pensamentos da pessoa quando é preciso — nunca com um tom',
+    'robotizadamente complacente nem excessivamente condescendente. Você não está ali para sempre dar',
+    'razão, e sim para pensar junto com honestidade.',
+    '',
     'IDIOMA: Responda sempre em português. Se a pessoa escrever em outro idioma, responda nesse mesmo',
     'idioma que ela está usando, com a mesma calidez e naturalidade.',
     '',
@@ -338,6 +353,141 @@ const SYSTEM_PROMPT: Record<Lang, string> = {
     'caso" clinicamente — continue sendo amigo dela enquanto diz isso, não um sistema roteando um chamado.',
   ].join('\n'),
 };
+
+// ===== Presentación inicial y perfilado (nombre + ocupación) =====
+//
+// Flujo:
+// 1. Usuario NUEVO (sin chat_logs, sin preferred_name): la app dispara un
+//    request con `init: true` apenas se abre el chat vacío, y Calivia manda
+//    el saludo obligatorio de bienvenida (NEW_USER_GREETING) sin esperar
+//    ningún mensaje del usuario.
+// 2. Usuario YA REGISTRADO (con chat_logs previos, pero preferred_name aún
+//    null porque se registró antes de esta función): en su próximo mensaje,
+//    en vez de la respuesta normal, se le pregunta NAME_PROMPT_EXISTING.
+// 3. En ambos casos, la respuesta de la persona a esa pregunta se procesa
+//    con extractNameAndOccupation() para guardar profiles.preferred_name /
+//    profiles.occupation, y se confirma con buildNameConfirmation() —
+//    frase de confirmación siempre determinista, nunca generada libremente
+//    por el modelo, igual que el protocolo de crisis.
+const NEW_USER_GREETING: Record<Lang, string> = {
+  es: 'Hola, soy Calivia, tu compañero/a en quien puedes confiar en tus procesos o en todo lo que desees. Cuéntame un poco de ti: ¿cómo te llamas o cómo te gustaría que te llame? ¿A qué te dedicas?',
+  en: "Hi, I'm Calivia, your companion — someone you can trust with your process, or with whatever you need. Tell me a bit about yourself: what's your name, or what would you like me to call you? What do you do?",
+  pt: 'Olá, sou a Calivia, sua companheira — alguém em quem você pode confiar nos seus processos ou em tudo o que precisar. Me conta um pouco sobre você: como você se chama, ou como gostaria que eu te chamasse? No que você trabalha?',
+};
+
+const NAME_PROMPT_EXISTING: Record<Lang, string> = {
+  es: 'Antes de seguir, quiero preguntarte algo que no te había preguntado: ¿cómo deseas que me dirija a ti?',
+  en: "Before we go on, there's something I hadn't asked you yet: what would you like me to call you?",
+  pt: 'Antes de continuar, quero te perguntar algo que ainda não tinha perguntado: como você gostaria que eu me dirigisse a você?',
+};
+
+const NAME_RETRY: Record<Lang, string> = {
+  es: 'Perdona, no logré entender bien tu nombre. ¿Me lo puedes repetir, tal como te gustaría que te llame?',
+  en: "Sorry, I didn't quite catch your name. Could you tell me again, exactly how you'd like me to call you?",
+  pt: 'Desculpa, não consegui entender bem o seu nome. Pode repetir, do jeito que gostaria que eu te chamasse?',
+};
+
+const NAME_CONFIRMATION_LEAD: Record<Lang, (name: string) => string> = {
+  es: (name) => `Perfecto, de ahora en adelante me dirigiré a ti como ${name}.`,
+  en: (name) => `Perfect, from now on I'll call you ${name}.`,
+  pt: (name) => `Perfeito, de agora em diante vou me dirigir a você como ${name}.`,
+};
+
+const NAME_CONFIRMATION_WITH_OCCUPATION: Record<Lang, (occ: string) => string> = {
+  es: (occ) => ` Así que te dedicas a ${occ} — cuéntame, ¿cómo lo llevas últimamente?`,
+  en: (occ) => ` So you work as ${occ} — tell me, how has that been going for you lately?`,
+  pt: (occ) => ` Então você trabalha com ${occ} — me conta, como isso tem sido ultimamente?`,
+};
+
+const NAME_CONFIRMATION_TAIL: Record<Lang, string> = {
+  es: ' Cuéntame, ¿qué traes hoy?',
+  en: ' Tell me, what brings you here today?',
+  pt: ' Me conta, o que te traz hoje?',
+};
+
+function buildNameConfirmation(name: string, occupation: string | null, lang: Lang): string {
+  const lead = NAME_CONFIRMATION_LEAD[lang](name);
+  if (occupation) return lead + NAME_CONFIRMATION_WITH_OCCUPATION[lang](occupation);
+  return lead + NAME_CONFIRMATION_TAIL[lang];
+}
+
+const EXTRACTION_PROMPT: Record<Lang, string> = {
+  es: 'Extrae de este mensaje el nombre o apodo por el que la persona quiere que la llamen, y su ocupación si la menciona. Responde ÚNICAMENTE con JSON de la forma {"name": string|null, "occupation": string|null}. El nombre debe ser solo el nombre/apodo (sin frases como "me llamo" o "soy"), con la primera letra en mayúscula. La ocupación debe ser una frase breve (2 a 6 palabras) o null si no se menciona. Si no puedes identificar ningún nombre, responde {"name": null, "occupation": null}.',
+  en: 'From this message, extract the name or nickname the person wants to be called, and their occupation if mentioned. Reply ONLY with JSON of the form {"name": string|null, "occupation": string|null}. The name should be just the name/nickname (no phrases like "my name is"), capitalized. The occupation should be a short phrase (2 to 6 words) or null if not mentioned. If you cannot identify any name, reply {"name": null, "occupation": null}.',
+  pt: 'Extraia desta mensagem o nome ou apelido pelo qual a pessoa quer ser chamada, e sua ocupação se for mencionada. Responda APENAS com JSON no formato {"name": string|null, "occupation": string|null}. O nome deve ser só o nome/apelido (sem frases como "me chamo"), com a primeira letra maiúscula. A ocupação deve ser uma frase curta (2 a 6 palavras) ou null se não for mencionada. Se não conseguir identificar nenhum nome, responda {"name": null, "occupation": null}.',
+};
+
+// Heurística de respaldo (sin OpenAI configurado): best-effort, solo para no
+// dejar el flujo de perfilado completamente roto en modo sin conexión a la IA.
+function heuristicExtractName(message: string, lang: Lang): { name: string | null; occupation: string | null } {
+  const text = message.trim();
+  if (!text) return { name: null, occupation: null };
+
+  const prefixesByLang: Record<Lang, RegExp[]> = {
+    es: [/^me llamo\s+/i, /^mi nombre es\s+/i, /^soy\s+/i, /^dime\s+/i, /^ll[aá]mame\s+/i],
+    en: [/^my name is\s+/i, /^i'?m\s+/i, /^i am\s+/i, /^call me\s+/i],
+    pt: [/^me chamo\s+/i, /^meu nome[ée]\s+/i, /^sou\s+/i, /^me chame de\s+/i],
+  };
+
+  let rest = text;
+  for (const re of prefixesByLang[lang]) rest = rest.replace(re, '');
+  if (!rest) return { name: null, occupation: null };
+
+  const parts = rest.split(/,| y | e | trabajo (?:de|como|en) | dedico a | and | i work | trabalho (?:de|como|em) | dedico a /i);
+  const namePart = parts[0]?.trim();
+  const name = namePart ? namePart.split(/\s+/).slice(0, 3).join(' ') : null;
+  const occupationPart = parts.length > 1 ? parts.slice(1).join(' ').trim() : null;
+
+  return {
+    name: name ? name.charAt(0).toUpperCase() + name.slice(1) : null,
+    occupation: occupationPart || null,
+  };
+}
+
+async function extractNameAndOccupation(
+  message: string,
+  lang: Lang,
+  apiKey: string | undefined
+): Promise<{ name: string | null; occupation: string | null }> {
+  if (apiKey) {
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: EXTRACTION_PROMPT[lang] },
+            { role: 'user', content: message },
+          ],
+          temperature: 0,
+          max_tokens: 100,
+          response_format: { type: 'json_object' },
+        }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const raw = json.choices?.[0]?.message?.content ?? '{}';
+        const parsed = JSON.parse(raw);
+        const name = typeof parsed.name === 'string' ? parsed.name.trim() : '';
+        const occupation = typeof parsed.occupation === 'string' ? parsed.occupation.trim() : '';
+        return { name: name || null, occupation: occupation || null };
+      }
+    } catch (err) {
+      console.error('extractNameAndOccupation: fallo la llamada a OpenAI:', err);
+    }
+  }
+  return heuristicExtractName(message, lang);
+}
+
+function buildPersonalizationContext(name: string, occupation: string | null, lang: Lang): string {
+  const lines: Record<Lang, string> = {
+    es: `PERFIL DE LA PERSONA: se llama, o quiere que la llames, "${name}"${occupation ? `, se dedica a ${occupation}` : ''}. Dirígete a ella por ese nombre de forma natural, sin abusar de repetirlo en cada mensaje, y usa el contexto de su ocupación cuando sea relevante para tus reflexiones o ejemplos.`,
+    en: `PERSON'S PROFILE: their name, or what they want to be called, is "${name}"${occupation ? `, they work as ${occupation}` : ''}. Address them by that name naturally, without overusing it in every message, and use their occupation as context when it's relevant to your reflections or examples.`,
+    pt: `PERFIL DA PESSOA: o nome dela, ou como ela quer ser chamada, é "${name}"${occupation ? `, ela trabalha com ${occupation}` : ''}. Dirija-se a ela por esse nome de forma natural, sem repeti-lo em toda mensagem, e use o contexto da ocupação quando for relevante para suas reflexões ou exemplos.`,
+  };
+  return '\n\n' + lines[lang];
+}
 
 const FALLBACK_REPLIES: Record<Lang, string[]> = {
   es: [
@@ -726,9 +876,13 @@ function pickFallback(msg: string, lang: Lang): string {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
   try {
-    const { userId, message, lang: rawLang } = await req.json();
+    const { userId, message: rawMessage, lang: rawLang, init } = await req.json();
     const lang = normalizeLang(rawLang);
-    if (!userId || !message) {
+    const message: string = typeof rawMessage === 'string' ? rawMessage : '';
+    // `init` es un disparo silencioso del frontend apenas se abre un chat
+    // vacío (ver AiChat.tsx), sin mensaje real del usuario — por eso no
+    // exige `message` cuando viene marcado.
+    if (!userId || (!init && !message)) {
       return new Response(JSON.stringify({ error: 'Faltan userId o message' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -736,6 +890,32 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
+    const apiKey = Deno.env.get('OPENAI_API_KEY');
+
+    const { data: profileRow } = await supabase
+      .from('profiles')
+      .select('preferred_name, occupation, name_prompt_sent_at, is_premium')
+      .eq('id', userId)
+      .maybeSingle();
+
+    // Saludo obligatorio de bienvenida: solo dispara si de verdad es un chat
+    // vacío (sin chat_logs) Y la persona todavía no tiene preferred_name —
+    // así una llamada de init repetida o tardía nunca duplica el saludo.
+    if (init) {
+      if (profileRow && !profileRow.preferred_name) {
+        const { count } = await supabase
+          .from('chat_logs')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userId);
+        if (!count) {
+          const greeting = NEW_USER_GREETING[lang];
+          await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: greeting });
+          await supabase.from('profiles').update({ name_prompt_sent_at: new Date().toISOString() }).eq('id', userId);
+          return new Response(JSON.stringify({ reply: greeting }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
+      return new Response(JSON.stringify({ reply: '' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     await maybeCreateRiskAlert(supabase, userId, message);
 
@@ -748,6 +928,36 @@ Deno.serve(async (req: Request) => {
       const crisisReply = await buildCrisisResponse(supabase, userId, lang);
       await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: crisisReply });
       return new Response(JSON.stringify({ reply: crisisReply, crisis: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Perfilado (nombre + ocupación): siempre tiene prioridad sobre el flujo
+    // normal de chat hasta que quede resuelto, para usuarios nuevos (recién
+    // saludados por el bloque `init` de arriba) y para cuentas existentes
+    // que todavía no tienen preferred_name (se registraron antes de este
+    // flujo). El protocolo de crisis de arriba sigue corriendo primero
+    // siempre, incluso durante el perfilado.
+    if (profileRow && !profileRow.preferred_name) {
+      if (!profileRow.name_prompt_sent_at) {
+        const prompt = NAME_PROMPT_EXISTING[lang];
+        await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: prompt });
+        await supabase.from('profiles').update({ name_prompt_sent_at: new Date().toISOString() }).eq('id', userId);
+        return new Response(JSON.stringify({ reply: prompt }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      const extracted = await extractNameAndOccupation(message, lang, apiKey);
+      if (extracted.name) {
+        await supabase
+          .from('profiles')
+          .update({ preferred_name: extracted.name, occupation: extracted.occupation ?? profileRow.occupation ?? null })
+          .eq('id', userId);
+        const confirmation = buildNameConfirmation(extracted.name, extracted.occupation, lang);
+        await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: confirmation });
+        return new Response(JSON.stringify({ reply: confirmation }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      const retry = NAME_RETRY[lang];
+      await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: retry });
+      return new Response(JSON.stringify({ reply: retry }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // Bug encontrado: pedir 'ascending: true' + 'limit' trae las 10 primeras filas de TODA
@@ -765,28 +975,34 @@ Deno.serve(async (req: Request) => {
     if (histErr) throw histErr;
 
     const convo = (history ?? []).reverse().map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
-    const apiKey = Deno.env.get('OPENAI_API_KEY');
 
-    // Memoria entre sesiones: los reportes diarios ya resumen patrones de
-    // ánimo y palabras clave. Se los pasamos como contexto silencioso para
-    // que mantenga continuidad, nunca para que los recite o los mencione
-    // como fuente ("según tus reportes...").
+    const personalizationContext = profileRow?.preferred_name
+      ? buildPersonalizationContext(profileRow.preferred_name, profileRow.occupation ?? null, lang)
+      : '';
+
+    // Memoria entre sesiones (patrones de varios días — "llevas días sintiéndote
+    // así..."): función PREMIUM. Los usuarios Free conservan su chat normal y el
+    // contexto reciente de la conversación (`convo`, arriba), pero Calivia no
+    // consulta el histórico de reportes diarios para hacer seguimiento entre
+    // días — ese acompañamiento de largo plazo es exclusivo de Calivia Ilimitada.
     let memoryContext = '';
-    const { data: pastReports } = await supabase
-      .from('ai_reports')
-      .select('report_date, mood_summary, keywords')
-      .eq('user_id', userId)
-      .order('report_date', { ascending: false })
-      .limit(5);
-    if (pastReports && pastReports.length > 0) {
-      const lines = pastReports.map((r) =>
-        `- ${r.report_date}: ${r.mood_summary}${r.keywords?.length ? ` (patrones: ${r.keywords.join(', ')})` : ''}`
-      );
-      memoryContext = [
-        '',
-        'MEMORIA DE SESIONES ANTERIORES (contexto interno para continuidad; NUNCA la recites ni digas frases como "según tus reportes" — solo úsala para comprender mejor a la persona de forma natural):',
-        ...lines,
-      ].join('\n');
+    if (profileRow?.is_premium) {
+      const { data: pastReports } = await supabase
+        .from('ai_reports')
+        .select('report_date, mood_summary, keywords')
+        .eq('user_id', userId)
+        .order('report_date', { ascending: false })
+        .limit(5);
+      if (pastReports && pastReports.length > 0) {
+        const lines = pastReports.map((r) =>
+          `- ${r.report_date}: ${r.mood_summary}${r.keywords?.length ? ` (patrones: ${r.keywords.join(', ')})` : ''}`
+        );
+        memoryContext = [
+          '',
+          'MEMORIA DE SESIONES ANTERIORES (contexto interno para continuidad; NUNCA la recites ni digas frases como "según tus reportes" — solo úsala para comprender mejor a la persona de forma natural):',
+          ...lines,
+        ].join('\n');
+      }
     }
 
     if (!apiKey) {
@@ -796,7 +1012,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const messages = [
-      { role: 'system', content: SYSTEM_PROMPT[lang] + memoryContext },
+      { role: 'system', content: SYSTEM_PROMPT[lang] + personalizationContext + memoryContext },
       ...convo,
       { role: 'user', content: message },
     ];

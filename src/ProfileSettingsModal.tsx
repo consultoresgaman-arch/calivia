@@ -20,6 +20,8 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [preferredName, setPreferredName] = useState('');
+  const [occupation, setOccupation] = useState('');
   const [phone, setPhone] = useState('');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [bio, setBio] = useState('');
@@ -41,6 +43,8 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     // volvería a correr justo después de guardar y borraría el mensaje
     // "Guardado." (y cualquier edición sin guardar) casi al instante.
     if (!open || !profile) return;
+    setPreferredName(profile.preferred_name ?? '');
+    setOccupation(profile.occupation ?? '');
     setPhone(profile.phone ?? '');
     setLicenseNumber(profile.license_number ?? '');
     setBio(profile.bio ?? '');
@@ -81,7 +85,13 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ phone: phone.trim() || null, license_number: licenseNumber.trim() || null, bio: bio.trim() || null })
+        .update({
+          preferred_name: preferredName.trim() || null,
+          occupation: occupation.trim() || null,
+          phone: phone.trim() || null,
+          license_number: licenseNumber.trim() || null,
+          bio: bio.trim() || null,
+        })
         .eq('id', profile.id);
       if (error) throw error;
       await refreshProfile();
@@ -173,6 +183,19 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
           </button>
         </div>
 
+        {!isPsychologist && (
+          <div className="psm-fields">
+            <label className="psm-field">
+              <span>{t('preferredNameLabel')}</span>
+              <input type="text" value={preferredName} onChange={(e) => setPreferredName(e.target.value)} placeholder={t('preferredNamePlaceholder')} />
+            </label>
+            <label className="psm-field">
+              <span>{t('occupationLabel')}</span>
+              <input type="text" value={occupation} onChange={(e) => setOccupation(e.target.value)} placeholder={t('occupationPlaceholder')} />
+            </label>
+          </div>
+        )}
+
         {isPsychologist && (
           <div className="psm-fields">
             <label className="psm-field">
@@ -192,11 +215,9 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
 
         {message && <p className="psm-message">{message}</p>}
 
-        {isPsychologist && (
-          <button className="psm-save" onClick={handleSave} disabled={saving} type="button">
-            {saving ? t('saving') : t('saveChanges')}
-          </button>
-        )}
+        <button className="psm-save" onClick={handleSave} disabled={saving} type="button">
+          {saving ? t('saving') : t('saveChanges')}
+        </button>
       </div>
 
       <style>{`

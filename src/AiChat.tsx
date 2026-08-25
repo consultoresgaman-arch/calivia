@@ -154,6 +154,8 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   const hasSelectedVoiceRef = useRef(false);
   const [ttsBlocked, setTtsBlocked] = useState(false);
   const lastReplyRef = useRef<string>('');
+  const [onboarding, setOnboarding] = useState(false);
+  const onboardingTriggeredRef = useRef(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
@@ -315,6 +317,45 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     })();
     return () => { mounted = false; };
   }, [userId]);
+
+  // Saludo obligatorio de bienvenida: si el chat está totalmente vacío (usuario
+  // nuevo, sin ningún chat_log todavía), Calivia se presenta y pregunta nombre
+  // y ocupación sin esperar a que la persona escriba primero. El backend
+  // (supabase/functions/ai-chat, flujo `init`) decide si de verdad corresponde
+  // saludar (chat vacío + sin preferred_name) — este disparo es best-effort y
+  // se protege con un ref para no repetirse dentro del mismo montaje.
+  useEffect(() => {
+    if (loading || messages.length > 0 || onboardingTriggeredRef.current) return;
+    onboardingTriggeredRef.current = true;
+    let cancelled = false;
+    setOnboarding(true);
+    (async () => {
+      try {
+        const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`;
+        const res = await fetch(fnUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ userId, message: '', lang, init: true }),
+        });
+        if (!cancelled && res.ok) {
+          const json = await res.json();
+          if (json.reply) {
+            setMessages((m) => (m.length === 0
+              ? [{ id: `onb-${Date.now()}`, user_id: userId, role: 'assistant', content: json.reply, created_at: new Date().toISOString() }]
+              : m));
+          }
+        }
+      } catch (err) {
+        console.error('[Calivia] saludo de bienvenida (init) falló:', err);
+      } finally {
+        if (!cancelled) setOnboarding(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loading, messages.length, userId, lang]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -597,7 +638,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       )}
 
       <div className="chat-body" ref={scrollRef}>
-        {loading ? (
+        {loading || onboarding ? (
           <div className="chat-empty">{t('loadingSpace')}</div>
         ) : messages.length === 0 ? (
           <div className="chat-welcome">
@@ -672,7 +713,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={limitReached ? t('inputPlaceholderLimit') : recording ? t('inputPlaceholderListening') : t('inputPlaceholderDefault')}
-          disabled={limitReached}
+          disabled={limitReached || onboarding}
           aria-label={t('inputAria')}
           rows={1}
           onKeyDown={(e) => {
@@ -684,14 +725,14 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
             type="button"
             className={`mic-btn ${recording ? 'rec' : ''} ${!voiceSupported ? 'disabled' : ''}`}
             onClick={startVoiceInput}
-            disabled={limitReached || !voiceSupported}
+            disabled={limitReached || !voiceSupported || onboarding}
             aria-label={recording ? t('stopRecording') : t('speakToMic')}
             title={voiceSupported ? t('micTitleSupported') : t('micTitleUnsupported')}
           >
             <Mic size={18} strokeWidth={2} />
           </button>
         )}
-        <button type="submit" className="send-btn" disabled={!input.trim() || limitReached}>
+        <button type="submit" className="send-btn" disabled={!input.trim() || limitReached || onboarding}>
           <Send size={18} strokeWidth={2} />
         </button>
       </form>
