@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+import { checkRateLimit, clientIp, rateLimitedResponse } from '../_shared/security.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -94,6 +95,15 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
+
+    // Sin sesión posible acá (la persona olvidó su contraseña) — se limita
+    // por IP y por el nombre pedido, para frenar tanto un script golpeando
+    // desde una sola máquina como un intento de enumerar/agotar el correo de
+    // una cuenta específica desde varias IPs.
+    const ip = clientIp(req);
+    const ipOk = await checkRateLimit(supabase, `pwreset-ip:${ip}`, 5, 300);
+    const nameOk = await checkRateLimit(supabase, `pwreset-name:${name.toLowerCase().trim()}`, 3, 900);
+    if (!ipOk || !nameOk) return rateLimitedResponse(corsHeaders);
 
     const { data, error } = await supabase
       .rpc('create_password_reset_code', { p_name: name })

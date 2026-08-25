@@ -1,9 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+import { resolveSession, checkRateLimit, unauthorizedResponse, rateLimitedResponse } from '../_shared/security.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey, x-session-token',
 };
 
 const SYSTEM_PROMPT = [
@@ -112,6 +113,12 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
+
+    const session = await resolveSession(supabase, req);
+    if (!session || session.userId !== userId) return unauthorizedResponse(corsHeaders);
+    if (!(await checkRateLimit(supabase, `journal-reflect:${userId}`, 20, 60))) {
+      return rateLimitedResponse(corsHeaders);
+    }
 
     const apiKey = Deno.env.get('OPENAI_API_KEY');
     let result: { reflection: string; suggestedTool: string; toolReason: string };

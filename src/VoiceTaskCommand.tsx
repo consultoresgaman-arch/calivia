@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Mic, X, CalendarCheck2, AlertCircle, Bell } from 'lucide-react';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { supabase } from './lib/supabase';
+import { getSessionToken } from './lib/session';
 import { ensureMicPermission } from './lib/micPermission';
 import { listenOnceNative, speakNative } from './lib/nativeSpeech';
 import { NATIVE, DEFAULT_SOUND_KEY, scheduleTaskReminder } from './lib/taskNotifications';
@@ -302,6 +303,7 @@ export default function VoiceTaskCommand({ userId, autoStartTrigger }: Props) {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'x-session-token': getSessionToken() ?? '',
         },
         body: JSON.stringify({
           userId,

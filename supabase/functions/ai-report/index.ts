@@ -1,9 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+import { resolveSession, checkRateLimit, unauthorizedResponse, rateLimitedResponse } from '../_shared/security.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey, x-session-token',
 };
 
 const DISCLAIMER = 'La interpretación clínica final corresponde siempre al profesional (Rubén Salguero).';
@@ -32,6 +33,17 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
+
+    // Esta función lee los chat_logs y check-ins CRUDOS de todos los pacientes
+    // con actividad en la fecha pedida — sin este chequeo, cualquiera con la
+    // anon key pública podía llamarla directo y generar (y de paso leer, vía
+    // ai_reports) resúmenes del historial de cualquier paciente. Solo el rol
+    // "psychologist" puede generar reportes.
+    const session = await resolveSession(supabase, req);
+    if (!session || session.role !== 'psychologist') return unauthorizedResponse(corsHeaders);
+    if (!(await checkRateLimit(supabase, `ai-report:${session.userId}`, 10, 60))) {
+      return rateLimitedResponse(corsHeaders);
+    }
 
     // Find all patients with activity on this date
     const start = `${date}T00:00:00Z`;

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Mic, Send, Heart, Zap, Volume2 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { supabase } from './lib/supabase';
+import { getSessionToken } from './lib/session';
 import type { ChatLog } from './lib/types';
 import { isCheckoutConfigured, openCheckout } from './lib/payments';
 import { ensureMicPermission } from './lib/micPermission';
@@ -382,6 +383,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            'x-session-token': getSessionToken() ?? '',
           },
           body: JSON.stringify({ userId, message: '', lang, init: true }),
         });
@@ -612,6 +614,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'x-session-token': getSessionToken() ?? '',
         },
         body: JSON.stringify({ userId, message: text, localTime, lang }),
       });

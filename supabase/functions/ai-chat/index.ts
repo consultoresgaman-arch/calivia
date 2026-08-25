@@ -1,9 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+import { resolveSession, checkRateLimit, unauthorizedResponse, rateLimitedResponse } from '../_shared/security.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey, x-session-token',
 };
 
 type Lang = 'es' | 'en' | 'pt';
@@ -965,6 +966,23 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
+
+    // Esta función usa la service role key (se salta RLS por completo), así
+    // que sin esto cualquiera con la anon key pública podía mandar CUALQUIER
+    // userId en el body y la función lo aceptaba sin más — escribía chat_logs,
+    // cambiaba preferred_name, etc. a nombre de otra persona. Ahora se exige
+    // que el token de sesión (x-session-token) resuelva exactamente a ese
+    // mismo userId.
+    const session = await resolveSession(supabase, req);
+    if (!session || session.userId !== userId) return unauthorizedResponse(corsHeaders);
+
+    // Máximo 20 peticiones por minuto por usuario — generoso para ráfagas de
+    // escritura real, pero corta un script que intente spamear la función
+    // (cada llamada exitosa dispara una llamada a OpenAI facturada).
+    if (!(await checkRateLimit(supabase, `ai-chat:${userId}`, 20, 60))) {
+      return rateLimitedResponse(corsHeaders);
+    }
+
     const apiKey = Deno.env.get('OPENAI_API_KEY');
 
     const { data: profileRow } = await supabase

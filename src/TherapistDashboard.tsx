@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, LogOut, Calendar, FileText, Users, UserPlus, UserMinus, AlertTriangle, Check, UserCog, NotebookPen, ClipboardList, Flame } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { getSessionToken } from './lib/session';
 import { useAuth } from './lib/auth';
 import { getAvatarSignedUrl } from './lib/avatar';
 import ProfileSettingsModal from './ProfileSettingsModal';
@@ -239,7 +240,11 @@ export default function TherapistDashboard() {
       const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-report`;
       const res = await fetch(fnUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'x-session-token': getSessionToken() ?? '',
+        },
         body: JSON.stringify({ date: selectedDate }),
       });
       if (!res.ok) {

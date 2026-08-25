@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { NotebookPen, CloudRain, Gamepad2, Vibrate, Send } from 'lucide-react';
 import { useLanguage, useT } from './lib/i18n';
+import { getSessionToken } from './lib/session';
 import strings from './JournalSpace.i18n';
 
 interface Props {
@@ -43,6 +44,7 @@ export default function JournalSpace({ userId, onOpenSounds, onOpenGames, onOpen
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'x-session-token': getSessionToken() ?? '',
         },
         body: JSON.stringify({ userId, content: text, lang }),
       });

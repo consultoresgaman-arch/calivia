@@ -5,10 +5,13 @@
 // es quien inserta en `tasks` (mismo camino autenticado por sesión que usa
 // TaskManager.tsx), así esta función no necesita tocar la base de datos.
 
+import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+import { resolveSession, checkRateLimit, unauthorizedResponse, rateLimitedResponse } from '../_shared/security.ts';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey, x-session-token',
 };
 
 type Lang = 'es' | 'en' | 'pt';
@@ -359,6 +362,16 @@ Deno.serve(async (req: Request) => {
     const lang = normalizeLang(rawLang);
     if (!userId || typeof transcript !== 'string' || !transcript.trim()) {
       return new Response(JSON.stringify({ error: 'Faltan userId o transcript' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
+    const session = await resolveSession(supabase, req);
+    if (!session || session.userId !== userId) return unauthorizedResponse(corsHeaders);
+    if (!(await checkRateLimit(supabase, `voice-task:${userId}`, 20, 60))) {
+      return rateLimitedResponse(corsHeaders);
     }
 
     const today = typeof localDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(localDate) ? localDate : new Date().toISOString().slice(0, 10);
