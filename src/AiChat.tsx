@@ -161,6 +161,12 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const fragmentTimerRef = useRef<number | null>(null);
   const ackIndexRef = useRef(0);
+  // Texto (y modo voz) que está esperando el protocolo de espera de arriba —
+  // si la app se va a segundo plano o se cierra mientras se espera esa pausa,
+  // lo disparamos de inmediato en vez de esperar los 3.5s completos, para no
+  // dejar un mensaje del usuario (ya guardado) sin que Calivia llegue siquiera
+  // a intentar responderlo.
+  const pendingFragmentRef = useRef<{ text: string; isVoice: boolean } | null>(null);
   // Ref sincrónico (no el estado `sending`, que puede quedar un instante
   // desactualizado por el renderizado de React) para saber sin ambigüedad
   // si ya hay una cadena de mensajes en curso — así dos mensajes mandados
@@ -299,6 +305,37 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
 
   useEffect(() => () => {
     if (fragmentTimerRef.current) clearTimeout(fragmentTimerRef.current);
+  }, []);
+
+  // Si la app pasa a segundo plano (o se cierra) mientras el protocolo de
+  // espera todavía está contando los FRAGMENT_QUIET_MS antes de llamar a
+  // Calivia, disparamos esa llamada de inmediato en vez de esperar el resto
+  // del plazo — así el pedido a la función ya queda en curso del lado del
+  // servidor (que guarda la respuesta en Supabase apenas la genera,
+  // independientemente de si el navegador sigue conectado) en vez de
+  // perderse por completo si el proceso muere antes de que se cumpla la espera.
+  useEffect(() => {
+    function flushPendingFragment() {
+      if (!fragmentTimerRef.current || !pendingFragmentRef.current) return;
+      clearTimeout(fragmentTimerRef.current);
+      fragmentTimerRef.current = null;
+      const { text, isVoice } = pendingFragmentRef.current;
+      pendingFragmentRef.current = null;
+      ackIndexRef.current = 0;
+      void callAssistant(text, isVoice).finally(() => {
+        chainActiveRef.current = false;
+      });
+    }
+    function onVisibilityChange() {
+      if (document.visibilityState === 'hidden') flushPendingFragment();
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', flushPendingFragment);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', flushPendingFragment);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -550,8 +587,10 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       const ack = BURST_ACK_REPLIES[lang][ackIndexRef.current % BURST_ACK_REPLIES[lang].length];
       ackIndexRef.current++;
       setMessages((m) => [...m, { id: `ack-${Date.now()}`, user_id: userId, role: 'assistant', content: ack, created_at: new Date().toISOString() }]);
+      pendingFragmentRef.current = { text, isVoice };
       fragmentTimerRef.current = window.setTimeout(async () => {
         fragmentTimerRef.current = null;
+        pendingFragmentRef.current = null;
         ackIndexRef.current = 0;
         await callAssistant(text, isVoice);
         if (!fragmentTimerRef.current) chainActiveRef.current = false;
