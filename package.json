@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:sync": "npx cap sync android && node scripts/strip-native-assets.mjs"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",
