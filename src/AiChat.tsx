@@ -304,15 +304,23 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   useEffect(() => {
     let mounted = true;
     (async () => {
+      // Igual que el bug ya corregido en supabase/functions/ai-chat/index.ts:
+      // 'ascending: true' + 'limit' trae las N filas MÁS ANTIGUAS de toda la
+      // conversación, no las más recientes. Pasadas las primeras 100 réplicas
+      // de una cuenta, reabrir la app mostraba solo el arranque de la
+      // conversación y "perdía" todo lo reciente, incluido lo último escrito
+      // — el historial seguía en Supabase, pero la pantalla nunca llegaba a
+      // pedirlo. El fix: pedir las más recientes en orden descendente y
+      // reordenarlas a cronológico antes de mostrarlas.
       const { data, error } = await supabase
         .from('chat_logs')
         .select('*')
         .eq('user_id', userId)
-        .order('created_at', { ascending: true })
-        .limit(100);
+        .order('created_at', { ascending: false })
+        .limit(200);
       if (!mounted) return;
       if (error) setError(localizeBackendError(error.message, lang));
-      else setMessages(data ?? []);
+      else setMessages((data ?? []).slice().reverse());
       setLoading(false);
     })();
     return () => { mounted = false; };
