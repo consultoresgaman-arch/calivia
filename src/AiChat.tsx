@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Mic, Send, Heart, Zap, Volume2, Eye, Smile, HeartHandshake } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { supabase } from './lib/supabase';
+import { useAuth } from './lib/auth';
 import { getSessionToken } from './lib/session';
 import type { ChatLog } from './lib/types';
 import { isCheckoutConfigured, openCheckout } from './lib/payments';
@@ -12,6 +13,7 @@ import strings, {
   SYSTEM_NOTE,
   QUICK_PROMPTS,
   FALLBACK_GREETINGS,
+  PERSONA_INTROS,
   BURST_ACK_REPLIES,
   SOCRATIC_FOLLOWUPS,
   CLOSURE_REPLIES,
@@ -68,6 +70,15 @@ const MODE_OPTIONS: { id: ChatMode; Icon: typeof Eye; labelKey: 'modeEspejo' | '
   { id: 'amigo', Icon: Smile, labelKey: 'modeAmigo' },
   { id: 'acompanante', Icon: HeartHandshake, labelKey: 'modeAcompanante' },
 ];
+
+// Columna de profiles donde vive el nombre personalizado de cada persona
+// (editable desde ProfileSettingsModal) — si está vacía, se usa el nombre
+// genérico del modo (Espejo/Amigo/Acompañante).
+const PERSONA_NAME_FIELD: Record<ChatMode, 'persona_name_espejo' | 'persona_name_amigo' | 'persona_name_acompanante'> = {
+  espejo: 'persona_name_espejo',
+  amigo: 'persona_name_amigo',
+  acompanante: 'persona_name_acompanante',
+};
 
 // Protocolo de espera (anti-interrupción): si el usuario sigue escribiendo
 // mensajes seguidos (mientras la IA todavía está "pensando" o apenas
@@ -158,6 +169,7 @@ interface Props {
 export default function AiChat({ userId, name, messagesSent, maxFree, onMessageSent }: Props) {
   const { lang } = useLanguage();
   const t = useT(strings);
+  const { profile, refreshProfile } = useAuth();
   const [messages, setMessages] = useState<ChatLog[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
@@ -196,7 +208,21 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     } catch { /* ignore */ }
   }, [mode, userId]);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  // Espejo sincrónico de `mode`, para que el bucle de modo voz (que puede
+  // seguir vivo a través de varios renders — ver runVoiceTurn más abajo)
+  // etiquete cada mensaje con la persona realmente activa en ese instante,
+  // no con la que estaba activa cuando arrancó la escucha.
+  const modeRef = useRef<ChatMode | null>(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+
+  const bottomRef = useRef<HTMLDivElement>(null);
+  // Evita animar el scroll la primera vez que se pinta un hilo (carga
+  // inicial o cambio de modo) — ahí queremos aparecer YA abajo del todo, no
+  // deslizarnos visiblemente por decenas de mensajes viejos. Se reactiva
+  // (vuelve a `false`) cada vez que cambia `mode`, para que el hilo nuevo
+  // también abra directo al final en vez de heredar el "ya se animó una vez"
+  // de otro hilo distinto.
+  const hasAutoScrolledRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const fragmentTimerRef = useRef<number | null>(null);
   const ackIndexRef = useRef(0);
@@ -414,6 +440,10 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
 
   useEffect(() => {
     let mounted = true;
+    setLoading(true);
+    setError(null);
+    setUsingFallback(false);
+    hasAutoScrolledRef.current = false;
     (async () => {
       // Igual que el bug ya corregido en supabase/functions/ai-chat/index.ts:
       // 'ascending: true' + 'limit' trae las N filas MÁS ANTIGUAS de toda la
@@ -423,19 +453,24 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       // — el historial seguía en Supabase, pero la pantalla nunca llegaba a
       // pedirlo. El fix: pedir las más recientes en orden descendente y
       // reordenarlas a cronológico antes de mostrarlas.
-      const { data, error } = await supabase
+      // Cada modo de personalidad tiene su propio hilo (chat_logs.mode) — al
+      // cambiar de modo se recarga acá con el filtro correcto, así que la
+      // conversación visible "se resetea" a la de esa persona, no a la de otra.
+      let query = supabase
         .from('chat_logs')
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(200);
+      query = mode ? query.eq('mode', mode) : query.is('mode', null);
+      const { data, error } = await query;
       if (!mounted) return;
       if (error) setError(localizeBackendError(error.message, lang));
       else setMessages((data ?? []).slice().reverse());
       setLoading(false);
     })();
     return () => { mounted = false; };
-  }, [userId]);
+  }, [userId, mode]);
 
   // Saludo obligatorio de bienvenida: si el chat está totalmente vacío (usuario
   // nuevo, sin ningún chat_log todavía), Calivia se presenta y pregunta nombre
@@ -477,9 +512,16 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     return () => { cancelled = true; };
   }, [loading, messages.length, userId, lang]);
 
+  // scrollIntoView (en vez de calcular scrollHeight de un contenedor puntual)
+  // porque el que de verdad scrollea acá es la página completa, no
+  // necesariamente el div del chat — así funciona sin importar cuál de los
+  // ancestros sea el que tiene el overflow real.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, sending]);
+    if (loading) return;
+    const behavior = hasAutoScrolledRef.current ? 'smooth' : 'auto';
+    hasAutoScrolledRef.current = true;
+    bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+  }, [messages, sending, loading]);
 
   function stopRecognition() {
     if (recognitionRef.current) {
@@ -713,15 +755,16 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     const joiningActiveChain = chainActiveRef.current;
     chainActiveRef.current = true;
 
+    const sendMode = modeRef.current;
     const tempId = `temp-${Date.now()}`;
     const now = new Date().toISOString();
-    setMessages((m) => [...m, { id: tempId, user_id: userId, role: 'user', content: text, created_at: now }]);
+    setMessages((m) => [...m, { id: tempId, user_id: userId, role: 'user', content: text, created_at: now, mode: sendMode }]);
 
     let saved: ChatLog;
     try {
       const { data, error: insErr } = await supabase
         .from('chat_logs')
-        .insert({ user_id: userId, role: 'user', content: text })
+        .insert({ user_id: userId, role: 'user', content: text, mode: sendMode })
         .select()
         .single();
       if (insErr) throw insErr;
@@ -772,7 +815,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
           'x-session-token': getSessionToken() ?? '',
         },
-        body: JSON.stringify({ userId, message: text, localTime, lang, mode }),
+        body: JSON.stringify({ userId, message: text, localTime, lang, mode: modeRef.current }),
       });
 
       let reply: string = '';
@@ -795,6 +838,20 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       const assistantLog: ChatLog = { id: `a-${Date.now()}`, user_id: userId, role: 'assistant', content: reply, created_at: new Date().toISOString() };
       setMessages((m) => [...m, assistantLog]);
 
+      // El flujo de perfilado (ver ai-chat/index.ts) puede haber guardado
+      // preferred_name/occupation en este intercambio — pero el `profile` de
+      // AuthContext solo se actualiza llamando a esto explícitamente. Sin
+      // este refresh, ese `profile` local se queda desactualizado (piensa
+      // que preferred_name sigue vacío) hasta que algo más lo refresque —
+      // y si la persona abre "Editar perfil" mientras tanto y guarda
+      // cualquier cosa, ese formulario reescribe preferred_name/occupation
+      // desde su copia local vieja, BORRANDO el nombre que ya se había
+      // guardado. Solo hace falta mientras el nombre siga sin capturarse;
+      // una vez capturado, esta condición deja de cumplirse sola.
+      if (!profile?.preferred_name) {
+        void refreshProfile();
+      }
+
       if (isVoice) {
         // El modo voz espera a que termine de hablar antes de volver a
         // escuchar (ver runVoiceTurn) — por eso se espera acá también.
@@ -808,6 +865,19 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     }
   }
 
+  // Cambiar de persona a mitad de una escucha/respuesta hablada sería
+  // confuso (¿quién te está respondiendo, la de antes o la nueva?) — cortar
+  // el modo voz acá hace que el cambio de botón sea un punto limpio de corte.
+  function handleModeClick(id: ChatMode) {
+    if (voiceModeRef.current) stopVoiceMode();
+    setMode((m) => (m === id ? null : id));
+  }
+
+  function personaLabel(id: ChatMode, labelKey: 'modeEspejo' | 'modeAmigo' | 'modeAcompanante'): string {
+    const custom = profile?.[PERSONA_NAME_FIELD[id]]?.trim();
+    return custom || t(labelKey);
+  }
+
   return (
     <section className="chat-card">
       <div className="chat-head">
@@ -815,8 +885,8 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           <Heart size={18} strokeWidth={2} />
         </div>
         <div className="chat-head-info">
-          <h2>Calivia</h2>
-          <p>{SYSTEM_NOTE[lang]}</p>
+          <h2>{mode ? personaLabel(mode, MODE_OPTIONS.find((o) => o.id === mode)!.labelKey) : 'Calivia'}</h2>
+          <p>{mode ? t('chattingWithPersona') : SYSTEM_NOTE[lang]}</p>
         </div>
       </div>
 
@@ -845,15 +915,19 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       </div>
       )}
 
-      <div className="chat-body" ref={scrollRef}>
+      <div className="chat-body">
         {loading || onboarding ? (
           <div className="chat-empty">{t('loadingSpace')}</div>
         ) : messages.length === 0 ? (
           <div className="chat-welcome">
             <div className="chat-welcome-icon">
-              <Heart size={24} strokeWidth={1.5} />
+              {mode ? (
+                (() => { const { Icon } = MODE_OPTIONS.find((o) => o.id === mode)!; return <Icon size={24} strokeWidth={1.5} />; })()
+              ) : (
+                <Heart size={24} strokeWidth={1.5} />
+              )}
             </div>
-            <p>{FALLBACK_GREETINGS[lang][getTimeOfDay()]}</p>
+            <p>{mode ? PERSONA_INTROS[mode][lang] : FALLBACK_GREETINGS[lang][getTimeOfDay()]}</p>
             <p className="chat-welcome-sub">{t('welcomeSub')}</p>
             <div className="quick-prompts">
               {QUICK_PROMPTS[lang].map((q) => (
@@ -885,6 +959,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
             </div>
           </div>
         )}
+        <div ref={bottomRef} />
       </div>
 
 
@@ -922,12 +997,12 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
             key={id}
             type="button"
             className={`mode-btn ${mode === id ? 'active' : ''}`}
-            onClick={() => setMode((m) => (m === id ? null : id))}
+            onClick={() => handleModeClick(id)}
             disabled={limitReached || onboarding}
             aria-pressed={mode === id}
           >
             <Icon size={14} strokeWidth={2} />
-            <span>{t(labelKey)}</span>
+            <span>{personaLabel(id, labelKey)}</span>
           </button>
         ))}
       </div>

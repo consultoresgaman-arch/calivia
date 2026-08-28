@@ -35,6 +35,7 @@ const strings: Strings = {
     modeEspejo: 'Espejo',
     modeAmigo: 'Amigo',
     modeAcompanante: 'Acompañante',
+    chattingWithPersona: 'Otra conversación, otra forma de acompañarte — no recuerda lo que hablaste con las demás.',
   },
   en: {
     voiceLabel: "Calivia's voice:",
@@ -69,6 +70,7 @@ const strings: Strings = {
     modeEspejo: 'Mirror',
     modeAmigo: 'Friend',
     modeAcompanante: 'Companion',
+    chattingWithPersona: "A separate conversation, a different way to be there for you — it doesn't remember what you talked about with the others.",
   },
   pt: {
     voiceLabel: 'Voz da Calivia:',
@@ -103,6 +105,7 @@ const strings: Strings = {
     modeEspejo: 'Espelho',
     modeAmigo: 'Amigo',
     modeAcompanante: 'Acompanhante',
+    chattingWithPersona: 'Outra conversa, outra forma de te acompanhar — não lembra do que você falou com as outras.',
   },
 };
 
@@ -154,6 +157,27 @@ export const FALLBACK_GREETINGS: Record<LanguageCode, Greetings> = {
     morning: 'Bom dia, sou a Calivia. Como você está se sentindo para começar o dia?',
     afternoon: 'Oi, boa tarde, sou a Calivia. Lembre-se de comer, ou você já comeu? Como está o seu dia?',
     night: 'Oi, sou a Calivia. Como foi o seu dia hoje? Você já jantou?',
+  },
+};
+
+// Frase de apertura mostrada SOLO en la interfaz (nunca se manda a la IA)
+// cuando el hilo de un modo de personalidad está vacío — refuerza desde el
+// primer instante que es alguien distinto, antes incluso del primer mensaje.
+export const PERSONA_INTROS: Record<'espejo' | 'amigo' | 'acompanante', Record<LanguageCode, string>> = {
+  espejo: {
+    es: 'Soy el Espejo. No vine a consolarte — vine a mostrarte lo que quizás no quieres ver. ¿Qué traes?',
+    en: "I'm the Mirror. I'm not here to comfort you — I'm here to show you what you might not want to see. What's going on?",
+    pt: 'Sou o Espelho. Não vim te confortar — vim te mostrar o que talvez você não queira ver. O que você traz?',
+  },
+  amigo: {
+    es: 'Ey, soy tu Amigo acá. Nada de formalidades — contame qué onda, o simplemente charlamos de lo que sea.',
+    en: "Hey, it's your Friend here. No formalities — tell me what's up, or let's just talk about whatever.",
+    pt: 'E aí, sou seu Amigo aqui. Sem formalidades — me conta o que rolou, ou só batemos um papo sobre qualquer coisa.',
+  },
+  acompanante: {
+    es: 'Estoy aquí, con calma, sin apuro. Cuando quieras empezar, aquí me tienes.',
+    en: "I'm here, calm, no rush. Whenever you're ready to start, I'm right here.",
+    pt: 'Estou aqui, com calma, sem pressa. Quando quiser começar, é só falar.',
   },
 };
 

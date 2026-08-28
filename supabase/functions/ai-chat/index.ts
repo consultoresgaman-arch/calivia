@@ -150,6 +150,19 @@ const MODE_LANGUAGE_DIRECTIVE: Record<Lang, string> = {
   pt: 'Responda sempre em português, a menos que a pessoa escreva em outro idioma — nesse caso, responda nesse mesmo idioma.',
 };
 
+// Nombre personalizado que la persona le puso a este modo desde su perfil
+// (profiles.persona_name_espejo/amigo/acompanante) — si lo puso, la IA se
+// presenta con ese nombre en vez del genérico "Espejo"/"Amigo"/"Acompañante",
+// reforzando que es alguien distinto en cada modo.
+function buildPersonaNameContext(name: string, lang: Lang): string {
+  const lines: Record<Lang, string> = {
+    es: `Tu nombre en este modo es "${name}". Preséntate y referite a ti misma con ese nombre si te preguntan cómo te llamas — no digas que te llamas "Calivia" ni el nombre genérico del modo.`,
+    en: `Your name in this mode is "${name}". Introduce yourself and refer to yourself by that name if asked what your name is — do not say your name is "Calivia" or the mode's generic name.`,
+    pt: `Seu nome neste modo é "${name}". Apresente-se e se refira a você mesma por esse nome se perguntarem como você se chama — não diga que se chama "Calivia" nem o nome genérico do modo.`,
+  };
+  return '\n\n' + lines[lang];
+}
+
 const SYSTEM_PROMPT: Record<Lang, string> = {
   es: [
     'ROL Y PROPÓSITO: Eres un acompañante emocional, confidente y guía en desarrollo personal dentro de',
@@ -1247,7 +1260,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: profileRow } = await supabase
       .from('profiles')
-      .select('preferred_name, occupation, name_prompt_sent_at, is_premium')
+      .select('preferred_name, occupation, name_prompt_sent_at, is_premium, persona_name_espejo, persona_name_amigo, persona_name_acompanante')
       .eq('id', userId)
       .maybeSingle();
 
@@ -1262,7 +1275,7 @@ Deno.serve(async (req: Request) => {
           .eq('user_id', userId);
         if (!count) {
           const greeting = NEW_USER_GREETING[lang];
-          await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: greeting });
+          await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: greeting, mode });
           await supabase.from('profiles').update({ name_prompt_sent_at: new Date().toISOString() }).eq('id', userId);
           return new Response(JSON.stringify({ reply: greeting }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
@@ -1291,7 +1304,7 @@ Deno.serve(async (req: Request) => {
     // el canal de ayuda del país cuando se conoce, sin pasar por OpenAI.
     if (detectRiskKeyword(message)) {
       const crisisReply = await buildCrisisResponse(supabase, userId, lang);
-      await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: crisisReply });
+      await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: crisisReply, mode });
       return new Response(JSON.stringify({ reply: crisisReply, crisis: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -1304,7 +1317,7 @@ Deno.serve(async (req: Request) => {
     if (profileRow && !profileRow.preferred_name) {
       if (!profileRow.name_prompt_sent_at) {
         const prompt = NAME_PROMPT_EXISTING[lang];
-        await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: prompt });
+        await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: prompt, mode });
         await supabase.from('profiles').update({ name_prompt_sent_at: new Date().toISOString() }).eq('id', userId);
         return new Response(JSON.stringify({ reply: prompt }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
@@ -1316,12 +1329,12 @@ Deno.serve(async (req: Request) => {
           .update({ preferred_name: extracted.name, occupation: extracted.occupation ?? profileRow.occupation ?? null })
           .eq('id', userId);
         const confirmation = buildNameConfirmation(extracted.name, extracted.occupation, lang);
-        await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: confirmation });
+        await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: confirmation, mode });
         return new Response(JSON.stringify({ reply: confirmation }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       const retry = NAME_RETRY[lang];
-      await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: retry });
+      await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: retry, mode });
       return new Response(JSON.stringify({ reply: retry }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -1331,12 +1344,17 @@ Deno.serve(async (req: Request) => {
     // que la persona decía después — por eso repetía preguntas y no avanzaba, sin importar
     // cuánto rato llevara conversando. El fix: pedir las más recientes en orden descendente y
     // reordenarlas a cronológico antes de mandárselas al modelo.
-    const { data: history, error: histErr } = await supabase
+    // Cada modo de personalidad tiene su propio hilo — filtrar por `mode` acá
+    // es lo que hace que cambiar de modo se sienta como hablar con alguien
+    // distinto: el modelo nunca ve lo que se dijo bajo otra personalidad.
+    let historyQuery = supabase
       .from('chat_logs')
       .select('role, content, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(20);
+    historyQuery = mode ? historyQuery.eq('mode', mode) : historyQuery.is('mode', null);
+    const { data: history, error: histErr } = await historyQuery;
     if (histErr) throw histErr;
 
     const convo = (history ?? []).reverse().map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
@@ -1372,16 +1390,19 @@ Deno.serve(async (req: Request) => {
 
     if (!apiKey) {
       const fallback = pickFallback(message, lang);
-      await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: fallback });
+      await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: fallback, mode });
       return new Response(JSON.stringify({ reply: fallback, fallback: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // Modo de personalidad activo (ver MODE_SYSTEM_PROMPTS arriba): reemplaza
     // por completo el prompt de personalidad/tono por defecto de Calivia,
     // pero la personalización (nombre/ocupación) y la memoria de sesiones
-    // premium se siguen aplicando encima, igual que en el modo por defecto.
+    // premium se siguen aplicando encima, igual que en el modo por defecto —
+    // esas son datos de la PERSONA (el usuario), no de la conversación, así
+    // que las cuatro personalidades los conocen por igual.
+    const personaName = mode ? (profileRow?.[`persona_name_${mode}`] as string | null | undefined) : null;
     const basePrompt = mode
-      ? `${MODE_SYSTEM_PROMPTS[mode][lang]}\n\n${MODE_LANGUAGE_DIRECTIVE[lang]}`
+      ? `${MODE_SYSTEM_PROMPTS[mode][lang]}\n\n${MODE_LANGUAGE_DIRECTIVE[lang]}${personaName ? buildPersonaNameContext(personaName, lang) : ''}`
       : SYSTEM_PROMPT[lang];
 
     const messages = [
@@ -1404,7 +1425,7 @@ Deno.serve(async (req: Request) => {
     const reply: string = aiJson.choices?.[0]?.message?.content?.trim() || '';
     if (!reply) throw new Error('Respuesta vacía de la IA.');
 
-    await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: reply });
+    await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: reply, mode });
     return new Response(JSON.stringify({ reply }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error inesperado';

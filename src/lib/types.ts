@@ -15,6 +15,9 @@ export interface Profile {
   occupation: string | null;
   terms_accepted_at: string | null;
   terms_version: string | null;
+  persona_name_espejo: string | null;
+  persona_name_amigo: string | null;
+  persona_name_acompanante: string | null;
 }
 
 export interface PatientLink {
@@ -48,6 +51,7 @@ export interface ChatLog {
   role: 'user' | 'assistant';
   content: string;
   created_at: string;
+  mode?: string | null;
 }
 
 export interface RiskAlert {

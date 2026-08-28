@@ -32,6 +32,9 @@ interface ProfileRow {
   occupation: string | null;
   terms_accepted_at: string | null;
   terms_version: string | null;
+  persona_name_espejo: string | null;
+  persona_name_amigo: string | null;
+  persona_name_acompanante: string | null;
 }
 
 interface ProfileRowWithSession extends ProfileRow {
@@ -54,6 +57,9 @@ function rowToProfile(row: ProfileRow): Profile {
     occupation: row.occupation,
     terms_accepted_at: row.terms_accepted_at,
     terms_version: row.terms_version,
+    persona_name_espejo: row.persona_name_espejo,
+    persona_name_amigo: row.persona_name_amigo,
+    persona_name_acompanante: row.persona_name_acompanante,
   };
 }
 

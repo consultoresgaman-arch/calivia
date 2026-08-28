@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Camera, Loader2 } from 'lucide-react';
+import { X, Camera, Loader2, Eye, Smile, HeartHandshake } from 'lucide-react';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
 import { uploadAvatar, getAvatarSignedUrl } from './lib/avatar';
@@ -23,6 +23,9 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
   const [preferredName, setPreferredName] = useState('');
   const [occupation, setOccupation] = useState('');
+  const [personaNameEspejo, setPersonaNameEspejo] = useState('');
+  const [personaNameAmigo, setPersonaNameAmigo] = useState('');
+  const [personaNameAcompanante, setPersonaNameAcompanante] = useState('');
   const [phone, setPhone] = useState('');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [bio, setBio] = useState('');
@@ -46,6 +49,9 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     if (!open || !profile) return;
     setPreferredName(profile.preferred_name ?? '');
     setOccupation(profile.occupation ?? '');
+    setPersonaNameEspejo(profile.persona_name_espejo ?? '');
+    setPersonaNameAmigo(profile.persona_name_amigo ?? '');
+    setPersonaNameAcompanante(profile.persona_name_acompanante ?? '');
     setPhone(profile.phone ?? '');
     setLicenseNumber(profile.license_number ?? '');
     setBio(profile.bio ?? '');
@@ -104,6 +110,9 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
         .update({
           preferred_name: preferredName.trim() || null,
           occupation: occupation.trim() || null,
+          persona_name_espejo: personaNameEspejo.trim() || null,
+          persona_name_amigo: personaNameAmigo.trim() || null,
+          persona_name_acompanante: personaNameAcompanante.trim() || null,
           phone: phone.trim() || null,
           license_number: licenseNumber.trim() || null,
           bio: bio.trim() || null,
@@ -213,6 +222,25 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
           </div>
         )}
 
+        {!isPsychologist && (
+          <div className="psm-fields">
+            <h3 className="psm-subtitle">{t('personaNamesTitle')}</h3>
+            <p className="psm-hint">{t('personaNamesHint')}</p>
+            <label className="psm-field psm-persona-field">
+              <span><Eye size={14} strokeWidth={2} /> {t('personaNameEspejoLabel')}</span>
+              <input type="text" value={personaNameEspejo} onChange={(e) => setPersonaNameEspejo(e.target.value)} placeholder={t('personaNameEspejoPlaceholder')} maxLength={30} />
+            </label>
+            <label className="psm-field psm-persona-field">
+              <span><Smile size={14} strokeWidth={2} /> {t('personaNameAmigoLabel')}</span>
+              <input type="text" value={personaNameAmigo} onChange={(e) => setPersonaNameAmigo(e.target.value)} placeholder={t('personaNameAmigoPlaceholder')} maxLength={30} />
+            </label>
+            <label className="psm-field psm-persona-field">
+              <span><HeartHandshake size={14} strokeWidth={2} /> {t('personaNameAcompananteLabel')}</span>
+              <input type="text" value={personaNameAcompanante} onChange={(e) => setPersonaNameAcompanante(e.target.value)} placeholder={t('personaNameAcompanantePlaceholder')} maxLength={30} />
+            </label>
+          </div>
+        )}
+
         {isPsychologist && (
           <div className="psm-fields">
             <label className="psm-field">
@@ -261,7 +289,9 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
 
         .psm-fields { display: flex; flex-direction: column; gap: 14px; }
         .psm-subtitle { margin: 0; font-size: 14px; color: var(--text); }
+        .psm-hint { margin: -8px 0 0; font-size: 12px; color: var(--text-soft); line-height: 1.5; }
         .psm-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-soft); }
+        .psm-persona-field span { display: flex; align-items: center; gap: 6px; }
         .psm-field input, .psm-field textarea { font: inherit; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); resize: vertical; }
         .psm-field input:focus, .psm-field textarea:focus { outline: 2px solid var(--primary-200); border-color: var(--primary-200); }
 
