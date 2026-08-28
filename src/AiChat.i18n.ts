@@ -36,6 +36,10 @@ const strings: Strings = {
     modeAmigo: 'Amigo',
     modeAcompanante: 'Acompañante',
     chattingWithPersona: 'Otra conversación, otra forma de acompañarte — no recuerda lo que hablaste con las demás.',
+    premiumBadge: 'Premium',
+    premiumVoiceLocked: 'El chat por voz es exclusivo de Calivia Ilimitada.',
+    premiumModeLocked: 'Este modo de personalidad es exclusivo de Calivia Ilimitada.',
+    closePremiumNotice: 'Cerrar aviso',
   },
   en: {
     voiceLabel: "Calivia's voice:",
@@ -71,6 +75,10 @@ const strings: Strings = {
     modeAmigo: 'Friend',
     modeAcompanante: 'Companion',
     chattingWithPersona: "A separate conversation, a different way to be there for you — it doesn't remember what you talked about with the others.",
+    premiumBadge: 'Premium',
+    premiumVoiceLocked: 'Voice chat is exclusive to Calivia Unlimited.',
+    premiumModeLocked: 'This personality mode is exclusive to Calivia Unlimited.',
+    closePremiumNotice: 'Close notice',
   },
   pt: {
     voiceLabel: 'Voz da Calivia:',
@@ -106,6 +114,10 @@ const strings: Strings = {
     modeAmigo: 'Amigo',
     modeAcompanante: 'Acompanhante',
     chattingWithPersona: 'Outra conversa, outra forma de te acompanhar — não lembra do que você falou com as outras.',
+    premiumBadge: 'Premium',
+    premiumVoiceLocked: 'O chat por voz é exclusivo da Calivia Ilimitada.',
+    premiumModeLocked: 'Este modo de personalidade é exclusivo da Calivia Ilimitada.',
+    closePremiumNotice: 'Fechar aviso',
   },
 };
 

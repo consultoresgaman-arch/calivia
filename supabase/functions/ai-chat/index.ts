@@ -1236,10 +1236,11 @@ function pickFallback(msg: string, lang: Lang): string {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
   try {
-    const { userId, message: rawMessage, lang: rawLang, init, mode: rawMode } = await req.json();
+    const { userId, message: rawMessage, lang: rawLang, init, mode: rawMode, isVoice: rawIsVoice } = await req.json();
     const lang = normalizeLang(rawLang);
     const message: string = typeof rawMessage === 'string' ? rawMessage : '';
     const mode = normalizeMode(rawMode);
+    const isVoice = rawIsVoice === true;
     // `init` es un disparo silencioso del frontend apenas se abre un chat
     // vacío (ver AiChat.tsx), sin mensaje real del usuario — por eso no
     // exige `message` cuando viene marcado.
@@ -1272,9 +1273,17 @@ Deno.serve(async (req: Request) => {
 
     const { data: profileRow } = await supabase
       .from('profiles')
-      .select('preferred_name, occupation, name_prompt_sent_at, is_premium, persona_name_espejo, persona_name_amigo, persona_name_acompanante')
+      .select('preferred_name, occupation, name_prompt_sent_at, is_premium, premium_until, persona_name_espejo, persona_name_amigo, persona_name_acompanante')
       .eq('id', userId)
       .maybeSingle();
+
+    // "Premium efectivo": igual que en resolve_session/login_profile/register_profile
+    // (ver 20260828000000_fix_session_rpcs_dropped_avatar_and_specialist_fields.sql),
+    // un accesos de cortesía con `premium_until` vencido NO cuenta como premium acá
+    // tampoco — si no, alguien con una prueba gratuita ya vencida seguiría teniendo
+    // chat por voz y modos avanzados desbloqueados.
+    const isPremium = !!profileRow?.is_premium
+      && (!profileRow?.premium_until || new Date(profileRow.premium_until as string) > new Date());
 
     // Saludo obligatorio de bienvenida: solo dispara si de verdad es un chat
     // vacío (sin chat_logs) Y la persona todavía no tiene preferred_name —
@@ -1350,6 +1359,28 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ reply: retry }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    // Paywall de monetización: el chat por voz y los modos de personalidad
+    // "Espejo"/"Acompañante" son exclusivos de Calivia Ilimitada. El frontend
+    // ya bloquea ambos para cuentas free (botón con candado + aviso, nunca
+    // deja que se llegue a pedir esto), así que llegar hasta acá con una de
+    // las dos cosas siendo cuenta free solo pasa si alguien se saltó la UI
+    // (llamada directa a la función) — se rechaza sin tocar OpenAI. El
+    // protocolo de crisis y el perfilado de arriba corren SIEMPRE primero,
+    // sin importar el plan: la seguridad y el perfilado nunca dependen de
+    // haber pagado.
+    if (isVoice && !isPremium) {
+      return new Response(
+        JSON.stringify({ error: 'El chat por voz es exclusivo de Calivia Ilimitada.', premiumRequired: true, feature: 'voice' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    if (mode && mode !== 'amigo' && !isPremium) {
+      return new Response(
+        JSON.stringify({ error: 'Este modo de personalidad es exclusivo de Calivia Ilimitada.', premiumRequired: true, feature: 'mode', mode }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Bug encontrado: pedir 'ascending: true' + 'limit' trae las 10 primeras filas de TODA
     // la conversación (las más antiguas), no las más recientes. Pasado el mensaje #10 de un
     // usuario, el modelo quedaba leyendo por siempre el inicio de la conversación y nunca lo
@@ -1381,7 +1412,7 @@ Deno.serve(async (req: Request) => {
     // consulta el histórico de reportes diarios para hacer seguimiento entre
     // días — ese acompañamiento de largo plazo es exclusivo de Calivia Ilimitada.
     let memoryContext = '';
-    if (profileRow?.is_premium) {
+    if (isPremium) {
       const { data: pastReports } = await supabase
         .from('ai_reports')
         .select('report_date, mood_summary, keywords')
