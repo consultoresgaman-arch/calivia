@@ -165,9 +165,9 @@ export const FALLBACK_GREETINGS: Record<LanguageCode, Greetings> = {
 // primer instante que es alguien distinto, antes incluso del primer mensaje.
 export const PERSONA_INTROS: Record<'espejo' | 'amigo' | 'acompanante', Record<LanguageCode, string>> = {
   espejo: {
-    es: 'Soy el Espejo. No vine a consolarte — vine a mostrarte lo que quizás no quieres ver. ¿Qué traes?',
-    en: "I'm the Mirror. I'm not here to comfort you — I'm here to show you what you might not want to see. What's going on?",
-    pt: 'Sou o Espelho. Não vim te confortar — vim te mostrar o que talvez você não queira ver. O que você traz?',
+    es: 'Soy el Espejo. Estoy aquí para mostrarte, con calma y precisión, lo que tal vez no estás viendo. ¿Qué traes?',
+    en: "I'm the Mirror. I'm here to show you, calmly and precisely, what you might not be seeing. What's going on?",
+    pt: 'Sou o Espelho. Estou aqui para te mostrar, com calma e precisão, o que talvez você não esteja vendo. O que você traz?',
   },
   amigo: {
     es: 'Ey, soy tu Amigo acá. Nada de formalidades — contame qué onda, o simplemente charlamos de lo que sea.',
