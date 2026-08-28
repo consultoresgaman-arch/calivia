@@ -30,6 +30,10 @@ const strings: Strings = {
     errUnexpected: 'Error inesperado',
     errEmptyReply: 'Respuesta vacía del asistente.',
     errAssistantNoResponse: 'El asistente no respondió ({{status}}). {{detail}}',
+    modeSelectorAria: 'Elegir la personalidad de Calivia',
+    modeEspejo: 'Espejo',
+    modeAmigo: 'Amigo',
+    modeAcompanante: 'Acompañante',
   },
   en: {
     voiceLabel: "Calivia's voice:",
@@ -59,6 +63,10 @@ const strings: Strings = {
     errUnexpected: 'Unexpected error',
     errEmptyReply: 'Empty reply from the assistant.',
     errAssistantNoResponse: "The assistant didn't respond ({{status}}). {{detail}}",
+    modeSelectorAria: "Choose Calivia's personality",
+    modeEspejo: 'Mirror',
+    modeAmigo: 'Friend',
+    modeAcompanante: 'Companion',
   },
   pt: {
     voiceLabel: 'Voz da Calivia:',
@@ -88,6 +96,10 @@ const strings: Strings = {
     errUnexpected: 'Erro inesperado',
     errEmptyReply: 'Resposta vazia do assistente.',
     errAssistantNoResponse: 'O assistente não respondeu ({{status}}). {{detail}}',
+    modeSelectorAria: 'Escolher a personalidade da Calivia',
+    modeEspejo: 'Espelho',
+    modeAmigo: 'Amigo',
+    modeAcompanante: 'Acompanhante',
   },
 };
 

@@ -20,6 +20,7 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
   const [preferredName, setPreferredName] = useState('');
   const [occupation, setOccupation] = useState('');
   const [phone, setPhone] = useState('');
@@ -49,6 +50,7 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     setLicenseNumber(profile.license_number ?? '');
     setBio(profile.bio ?? '');
     setMessage(null);
+    setAvatarMessage(null);
     setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
@@ -65,14 +67,28 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     e.target.value = '';
     if (!file || !profile) return;
     setUploadingAvatar(true);
-    setMessage(null);
+    setAvatarMessage(null);
     try {
       const path = await uploadAvatar(profile.id, file);
-      const url = await getAvatarSignedUrl(path);
+      // La subida en sí ya está confirmada acá — lo que sigue es solo pedir
+      // la URL firmada para mostrarla. Si esa segunda llamada falla justo
+      // después del upsert (p. ej. una demora breve de consistencia del
+      // storage), reintentamos una vez antes de darlo por perdido, en vez
+      // de dejar el círculo en gris sin explicación aunque la foto sí se
+      // haya guardado.
+      let url: string | null;
+      try {
+        url = await getAvatarSignedUrl(path, true);
+      } catch (firstErr) {
+        console.error('[Calivia] primer intento de getAvatarSignedUrl falló, reintentando:', firstErr);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        url = await getAvatarSignedUrl(path, true);
+      }
       setAvatarUrl(url);
       await refreshProfile();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : t('uploadFailed'));
+      console.error('[Calivia] handleAvatarPick falló:', err);
+      setAvatarMessage(err instanceof Error ? err.message : t('uploadFailed'));
     } finally {
       setUploadingAvatar(false);
     }
@@ -150,6 +166,7 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
             <Camera size={14} strokeWidth={2} /><span>{t('changePhoto')}</span>
           </button>
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarPick} hidden />
+          {avatarMessage && <p className="psm-message psm-message-error psm-avatar-message">{avatarMessage}</p>}
         </div>
 
         <div className="psm-field">
@@ -250,6 +267,7 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
 
         .psm-message { margin: 0; font-size: 13px; color: var(--primary-600); font-weight: 600; }
         .psm-message-error { color: var(--danger); }
+        .psm-avatar-message { text-align: center; max-width: 260px; }
         .psm-save { padding: 12px; border: none; border-radius: 999px; background: var(--primary); color: #fff; font-size: 14.5px; font-weight: 700; cursor: pointer; }
         .psm-save:hover:not(:disabled) { background: var(--primary-600); }
         .psm-save:disabled { opacity: 0.6; cursor: not-allowed; }

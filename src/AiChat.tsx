@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mic, Send, Heart, Zap, Volume2 } from 'lucide-react';
+import { Mic, Send, Heart, Zap, Volume2, Eye, Smile, HeartHandshake } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { supabase } from './lib/supabase';
 import { getSessionToken } from './lib/session';
@@ -50,6 +50,24 @@ function voiceQualityScore(v: SpeechSynthesisVoice): number {
 
 const VOICE_INPUT_ENABLED = true;
 const NATIVE = Capacitor.isNativePlatform();
+
+// Modos de personalidad seleccionables desde la barra de botones del chat.
+// `null` = personalidad por defecto de Calivia (sin ningún botón activo).
+// El modo activo viaja en cada request a supabase/functions/ai-chat, que
+// decide ahí qué prompt de sistema inyectar (ver MODE_SYSTEM_PROMPTS en ese
+// archivo) — el protocolo de crisis determinista sigue corriendo igual sin
+// importar el modo, así que la seguridad no depende de esta elección.
+type ChatMode = 'espejo' | 'amigo' | 'acompanante';
+
+function isChatMode(value: string | null): value is ChatMode {
+  return value === 'espejo' || value === 'amigo' || value === 'acompanante';
+}
+
+const MODE_OPTIONS: { id: ChatMode; Icon: typeof Eye; labelKey: 'modeEspejo' | 'modeAmigo' | 'modeAcompanante' }[] = [
+  { id: 'espejo', Icon: Eye, labelKey: 'modeEspejo' },
+  { id: 'amigo', Icon: Smile, labelKey: 'modeAmigo' },
+  { id: 'acompanante', Icon: HeartHandshake, labelKey: 'modeAcompanante' },
+];
 
 // Protocolo de espera (anti-interrupción): si el usuario sigue escribiendo
 // mensajes seguidos (mientras la IA todavía está "pensando" o apenas
@@ -158,6 +176,26 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   const [onboarding, setOnboarding] = useState(false);
   const onboardingTriggeredRef = useRef(false);
 
+  // Modo de personalidad activo — vive solo en sessionStorage (se guarda "en
+  // la sesión", no permanentemente), separado por usuario para no filtrarse
+  // entre cuentas si el navegador se comparte.
+  const [mode, setMode] = useState<ChatMode | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const stored = sessionStorage.getItem(`calivia-chat-mode-${userId}`);
+      return isChatMode(stored) ? stored : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (mode) sessionStorage.setItem(`calivia-chat-mode-${userId}`, mode);
+      else sessionStorage.removeItem(`calivia-chat-mode-${userId}`);
+    } catch { /* ignore */ }
+  }, [mode, userId]);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const fragmentTimerRef = useRef<number | null>(null);
@@ -168,6 +206,14 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   // dejar un mensaje del usuario (ya guardado) sin que Calivia llegue siquiera
   // a intentar responderlo.
   const pendingFragmentRef = useRef<{ text: string; isVoice: boolean } | null>(null);
+  // Marca si el texto que hay ahora mismo en el input vino de dictado por voz
+  // (en vez de tecleado). El botón de mic solo llena el input para que la
+  // persona lo revise antes de enviar (nunca envía solo), así que el envío
+  // real siempre pasa por el botón de enviar / Enter — sin este ref, `send()`
+  // no tenía forma de saber que ese mensaje empezó como dictado, así que
+  // `isVoice` quedaba fijo en `false` siempre y Calivia nunca leía su
+  // respuesta en voz alta aunque el usuario hubiera dictado el mensaje.
+  const pendingVoiceReplyRef = useRef(false);
   // Ref sincrónico (no el estado `sending`, que puede quedar un instante
   // desactualizado por el renderizado de React) para saber sin ambigüedad
   // si ya hay una cadena de mensajes en curso — así dos mensajes mandados
@@ -423,6 +469,9 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     }
     stopRecognition();
     setError(null);
+    // Cada grabación nueva empieza un turno de voz limpio — si la anterior
+    // nunca se envió, no debe "contaminar" este dictado.
+    pendingVoiceReplyRef.current = false;
 
     if (NATIVE) {
       await startVoiceInputNative();
@@ -441,6 +490,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       // Igual que en el flujo web: deja el texto transcrito en el input para que la persona
       // lo revise y lo edite si quiere — el envío queda en sus manos, con un toque.
       setInput(text);
+      if (text.trim()) pendingVoiceReplyRef.current = true;
     } catch (err) {
       console.error('[Calivia] startVoiceInputNative falló:', err);
       const code = err instanceof Error ? err.message : '';
@@ -527,6 +577,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         recognitionRef.current = null;
         // Deja el texto transcrito en el input para que la persona lo revise
         // y lo edite si quiere — el envío queda en sus manos, con un toque.
+        if (finalTranscript.trim()) pendingVoiceReplyRef.current = true;
       };
 
       recognitionRef.current = recognition;
@@ -541,10 +592,15 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     }
   }
 
-  async function send(e: React.FormEvent | null, overrideText?: string, isVoice: boolean = false) {
+  async function send(e: React.FormEvent | null, overrideText?: string, isVoice?: boolean) {
     e?.preventDefault();
     const text = (overrideText ?? input).trim();
     if (!text || limitReached) return;
+    // Si no se especifica explícitamente (p. ej. los chips rápidos siempre
+    // mandan `false`), el envío desde el formulario/Enter hereda si el texto
+    // actual vino de un dictado por voz — ver pendingVoiceReplyRef arriba.
+    const voiceReply = isVoice ?? pendingVoiceReplyRef.current;
+    pendingVoiceReplyRef.current = false;
     stopRecognition();
     setError(null);
     setInput('');
@@ -576,6 +632,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       setError(err instanceof Error ? localizeBackendError(err.message, lang) : t('errUnexpected'));
       setMessages((m) => m.filter((x) => x.id !== tempId));
       setInput(text);
+      pendingVoiceReplyRef.current = voiceReply;
       if (!fragmentTimerRef.current) chainActiveRef.current = false;
       return;
     }
@@ -589,18 +646,18 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       const ack = BURST_ACK_REPLIES[lang][ackIndexRef.current % BURST_ACK_REPLIES[lang].length];
       ackIndexRef.current++;
       setMessages((m) => [...m, { id: `ack-${Date.now()}`, user_id: userId, role: 'assistant', content: ack, created_at: new Date().toISOString() }]);
-      pendingFragmentRef.current = { text, isVoice };
+      pendingFragmentRef.current = { text, isVoice: voiceReply };
       fragmentTimerRef.current = window.setTimeout(async () => {
         fragmentTimerRef.current = null;
         pendingFragmentRef.current = null;
         ackIndexRef.current = 0;
-        await callAssistant(text, isVoice);
+        await callAssistant(text, voiceReply);
         if (!fragmentTimerRef.current) chainActiveRef.current = false;
       }, FRAGMENT_QUIET_MS);
       return;
     }
 
-    await callAssistant(text, isVoice);
+    await callAssistant(text, voiceReply);
     if (!fragmentTimerRef.current) chainActiveRef.current = false;
   }
 
@@ -616,7 +673,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
           'x-session-token': getSessionToken() ?? '',
         },
-        body: JSON.stringify({ userId, message: text, localTime, lang }),
+        body: JSON.stringify({ userId, message: text, localTime, lang, mode }),
       });
 
       let reply: string = '';
@@ -758,7 +815,23 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         </div>
       )}
 
-      <form className="chat-input" onSubmit={(e) => send(e, undefined, false)}>
+      <div className="mode-selector-bar" role="group" aria-label={t('modeSelectorAria')}>
+        {MODE_OPTIONS.map(({ id, Icon, labelKey }) => (
+          <button
+            key={id}
+            type="button"
+            className={`mode-btn ${mode === id ? 'active' : ''}`}
+            onClick={() => setMode((m) => (m === id ? null : id))}
+            disabled={limitReached || onboarding}
+            aria-pressed={mode === id}
+          >
+            <Icon size={14} strokeWidth={2} />
+            <span>{t(labelKey)}</span>
+          </button>
+        ))}
+      </div>
+
+      <form className="chat-input" onSubmit={(e) => send(e)}>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -767,7 +840,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           aria-label={t('inputAria')}
           rows={1}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e, undefined, false); }
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e); }
           }}
         />
         {VOICE_INPUT_ENABLED && (
@@ -906,9 +979,27 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         }
         .chat-limit-cta:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(112,130,56,0.3); }
 
+        .mode-selector-bar {
+          display: flex; gap: 6px; padding-top: 10px;
+          border-top: 1px solid var(--border-soft);
+        }
+        .mode-btn {
+          flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+          padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);
+          background: var(--surface-2); color: var(--text-soft);
+          font-size: 12.5px; font-weight: 600; cursor: pointer;
+          transition: border-color 0.15s, color 0.15s, background 0.15s, box-shadow 0.15s;
+        }
+        .mode-btn:hover:not(:disabled) { border-color: var(--primary-200); color: var(--primary-600); background: rgba(112,130,56,0.06); }
+        .mode-btn.active {
+          background: var(--primary); color: #fff; border-color: var(--primary);
+          box-shadow: 0 2px 8px rgba(112,130,56,0.25);
+        }
+        .mode-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
         .chat-input {
           display: flex; gap: 8px; padding-top: 12px;
-          border-top: 1px solid var(--border-soft); align-items: flex-end;
+          align-items: flex-end;
         }
         .chat-input textarea {
           flex: 1; padding: 12px 14px;
