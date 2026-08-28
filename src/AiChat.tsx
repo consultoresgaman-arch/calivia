@@ -6,7 +6,7 @@ import { getSessionToken } from './lib/session';
 import type { ChatLog } from './lib/types';
 import { isCheckoutConfigured, openCheckout } from './lib/payments';
 import { ensureMicPermission } from './lib/micPermission';
-import { listenOnceNative, speakNative } from './lib/nativeSpeech';
+import { listenOnceNative, speakNative, stopNativeListening, stopNativeSpeech } from './lib/nativeSpeech';
 import { useLanguage, useT, localizeBackendError, type LanguageCode } from './lib/i18n';
 import strings, {
   SYSTEM_NOTE,
@@ -206,14 +206,18 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   // dejar un mensaje del usuario (ya guardado) sin que Calivia llegue siquiera
   // a intentar responderlo.
   const pendingFragmentRef = useRef<{ text: string; isVoice: boolean } | null>(null);
-  // Marca si el texto que hay ahora mismo en el input vino de dictado por voz
-  // (en vez de tecleado). El botón de mic solo llena el input para que la
-  // persona lo revise antes de enviar (nunca envía solo), así que el envío
-  // real siempre pasa por el botón de enviar / Enter — sin este ref, `send()`
-  // no tenía forma de saber que ese mensaje empezó como dictado, así que
-  // `isVoice` quedaba fijo en `false` siempre y Calivia nunca leía su
-  // respuesta en voz alta aunque el usuario hubiera dictado el mensaje.
-  const pendingVoiceReplyRef = useRef(false);
+  // Modo voz: conversación continua por micrófono. Mientras está activo, cada
+  // vez que la persona termina de hablar el mensaje se manda solo (sin tocar
+  // enviar) y, apenas Calivia termina de responder en voz, se vuelve a
+  // escuchar — hasta que se toca el botón de nuevo para apagarlo. `voiceModeRef`
+  // es la fuente de verdad sincrónica que lee el bucle async (runVoiceTurn);
+  // `voiceModeActive` es solo para reflejarlo en la UI.
+  const [voiceModeActive, setVoiceModeActive] = useState(false);
+  const voiceModeRef = useRef(false);
+  // Espejo sincrónico de `limitReached` (prop derivada) para que el bucle de
+  // modo voz, que puede seguir vivo a través de varios renders, siempre lea
+  // el valor más reciente en vez de quedarse con el de cuando arrancó.
+  const limitReachedRef = useRef(false);
   // Ref sincrónico (no el estado `sending`, que puede quedar un instante
   // desactualizado por el renderizado de React) para saber sin ambigüedad
   // si ya hay una cadena de mensajes en curso — así dos mensajes mandados
@@ -221,12 +225,13 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   const chainActiveRef = useRef(false);
 
   const limitReached = messagesSent >= maxFree;
+  useEffect(() => { limitReachedRef.current = limitReached; }, [limitReached]);
 
   useEffect(() => {
     // En build nativa siempre hay una vía de reconocimiento (el plugin nativo, ver
     // lib/nativeSpeech.ts), aunque el WebView no traiga la Web Speech API del navegador (que
     // además, aunque exista como objeto global ahí, no tiene motor real detrás — ver
-    // startVoiceInput más abajo).
+    // runVoiceTurnWeb más abajo).
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!NATIVE && !SR) setVoiceSupported(false);
 
@@ -302,56 +307,78 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang]);
 
-  function speakResponse(text: string) {
+  // Devuelve una promesa que resuelve cuando termina de hablar (o falla/se
+  // bloquea) — el modo voz la espera antes de volver a escuchar, así nunca
+  // se superpone con la respuesta que Calivia todavía está leyendo.
+  function speakResponse(text: string): Promise<void> {
     lastReplyRef.current = text;
 
     if (NATIVE) {
-      void speakNative(text, SPEECH_LANG_TAG[lang]).catch((err) => {
+      return speakNative(text, SPEECH_LANG_TAG[lang]).catch((err) => {
         console.error('[Calivia] speakResponse (nativo) falló:', err);
       });
-      return;
     }
 
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return Promise.resolve();
 
-      let chosenVoice: SpeechSynthesisVoice | undefined;
-      if (voices.length > 0 && selectedVoiceUri) {
-        chosenVoice = voices.find((v) => v.voiceURI === selectedVoiceUri);
-        if (chosenVoice) utterance.voice = chosenVoice;
+    return new Promise<void>((resolve) => {
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+
+        let chosenVoice: SpeechSynthesisVoice | undefined;
+        if (voices.length > 0 && selectedVoiceUri) {
+          chosenVoice = voices.find((v) => v.voiceURI === selectedVoiceUri);
+          if (chosenVoice) utterance.voice = chosenVoice;
+        }
+        utterance.lang = chosenVoice?.lang || SPEECH_LANG_TAG[lang];
+        utterance.rate = 0.95;
+        utterance.pitch = 1;
+
+        // Algunos navegadores bloquean la reproducción automática de audio por
+        // políticas de seguridad si no hay un gesto directo del usuario en ese
+        // instante. Si el motor nunca llega a "empezar" a hablar, lo tratamos
+        // como bloqueado y mostramos un botón para activarlo con un toque.
+        let started = false;
+        let settled = false;
+        const finish = () => { if (!settled) { settled = true; resolve(); } };
+
+        utterance.onstart = () => { started = true; setTtsBlocked(false); };
+        utterance.onerror = (e) => {
+          console.error('[Calivia] speechSynthesis onerror:', (e as any).error);
+          if (!started) setTtsBlocked(true);
+          finish();
+        };
+        utterance.onend = () => finish();
+        window.speechSynthesis.speak(utterance);
+        window.setTimeout(() => {
+          if (!started && window.speechSynthesis.speaking === false) {
+            setTtsBlocked(true);
+            finish();
+          }
+        }, 600);
+      } catch (err) {
+        console.error('[Calivia] speakResponse falló:', err);
+        setTtsBlocked(true);
+        resolve();
       }
-      utterance.lang = chosenVoice?.lang || SPEECH_LANG_TAG[lang];
-      utterance.rate = 0.95;
-      utterance.pitch = 1;
-
-      // Algunos navegadores bloquean la reproducción automática de audio por
-      // políticas de seguridad si no hay un gesto directo del usuario en ese
-      // instante. Si el motor nunca llega a "empezar" a hablar, lo tratamos
-      // como bloqueado y mostramos un botón para activarlo con un toque.
-      let started = false;
-      utterance.onstart = () => { started = true; setTtsBlocked(false); };
-      utterance.onerror = (e) => {
-        console.error('[Calivia] speechSynthesis onerror:', (e as any).error);
-        if (!started) setTtsBlocked(true);
-      };
-      window.speechSynthesis.speak(utterance);
-      window.setTimeout(() => {
-        if (!started && window.speechSynthesis.speaking === false) setTtsBlocked(true);
-      }, 600);
-    } catch (err) {
-      console.error('[Calivia] speakResponse falló:', err);
-      setTtsBlocked(true);
-    }
+    });
   }
 
   function replayLastResponse() {
-    if (lastReplyRef.current) speakResponse(lastReplyRef.current);
+    if (lastReplyRef.current) void speakResponse(lastReplyRef.current);
   }
 
   useEffect(() => () => {
     if (fragmentTimerRef.current) clearTimeout(fragmentTimerRef.current);
+  }, []);
+
+  // Si este componente se desmonta (p. ej. la persona cambia de pestaña
+  // dentro de la app) con el modo voz activo, hay que apagarlo — si no, el
+  // bucle de escucha seguiría vivo de fondo, llamando a setState sobre un
+  // componente que ya no está montado.
+  useEffect(() => () => {
+    stopVoiceMode();
   }, []);
 
   // Si la app pasa a segundo plano (o se cierra) mientras el protocolo de
@@ -462,145 +489,218 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     setRecording(false);
   }
 
-  async function startVoiceInput() {
-    if (!voiceSupported || recording) {
-      stopRecognition();
-      return;
-    }
+  // Apaga el modo voz por completo: corta cualquier escucha o habla en curso
+  // (nativa o web) y deja de programar el siguiente turno. Es la única forma
+  // de salir — se dispara al tocar el mic de nuevo, o si algo falla en serio.
+  function stopVoiceMode() {
+    voiceModeRef.current = false;
+    setVoiceModeActive(false);
     stopRecognition();
-    setError(null);
-    // Cada grabación nueva empieza un turno de voz limpio — si la anterior
-    // nunca se envió, no debe "contaminar" este dictado.
-    pendingVoiceReplyRef.current = false;
-
     if (NATIVE) {
-      await startVoiceInputNative();
+      void stopNativeListening();
+      void stopNativeSpeech();
+    } else if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+    }
+  }
+
+  // Botón de mic: alterna el modo voz completo (conversación continua), no
+  // una sola grabación. Prendido, sigue escuchando → mandando → escuchando
+  // hasta que se lo apague con el mismo botón.
+  async function toggleVoiceMode() {
+    if (!voiceSupported) return;
+    if (voiceModeRef.current) {
+      stopVoiceMode();
       return;
     }
-    await startVoiceInputWeb();
+    if (limitReachedRef.current) return;
+    setError(null);
+    voiceModeRef.current = true;
+    setVoiceModeActive(true);
+    await runVoiceTurn();
+  }
+
+  // Un "turno": escucha una vez y, si salió algo, lo manda. Si el modo voz
+  // sigue activo al terminar, se vuelve a llamar a sí misma — cada llamada
+  // recursiva queda detrás de un `await`, así que no acumula stack aunque la
+  // conversación dure muchos turnos.
+  async function runVoiceTurn(): Promise<void> {
+    if (!voiceModeRef.current) return;
+    if (limitReachedRef.current) {
+      stopVoiceMode();
+      return;
+    }
+    if (NATIVE) {
+      await runVoiceTurnNative();
+    } else {
+      await runVoiceTurnWeb();
+    }
+    if (voiceModeRef.current) {
+      await runVoiceTurn();
+    }
   }
 
   // Build nativa: el SpeechRecognizer real de Android, vía plugin (ver lib/nativeSpeech.ts) —
   // el WebView embebido no tiene motor real detrás de la Web Speech API del navegador (esa sí
-  // sirve para pruebas de escritorio en Chrome/Edge, ver startVoiceInputWeb).
-  async function startVoiceInputNative() {
+  // sirve para pruebas de escritorio en Chrome/Edge, ver runVoiceTurnWeb).
+  async function runVoiceTurnNative(): Promise<void> {
     setRecording(true);
+    let transcript: string | null = null;
     try {
-      const text = await listenOnceNative(SPEECH_LANG_TAG[lang]);
-      // Igual que en el flujo web: deja el texto transcrito en el input para que la persona
-      // lo revise y lo edite si quiere — el envío queda en sus manos, con un toque.
-      setInput(text);
-      if (text.trim()) pendingVoiceReplyRef.current = true;
+      transcript = await listenOnceNative(SPEECH_LANG_TAG[lang]);
     } catch (err) {
-      console.error('[Calivia] startVoiceInputNative falló:', err);
       const code = err instanceof Error ? err.message : '';
-      if (code === 'speech-recognition-permission-denied') setError(t('errMicPermission'));
-      else if (code === 'speech-recognition-unavailable') setError(t('errNoVoiceSupport'));
-      else if (code === 'speech-recognition-empty') { /* silencio: no hay nada que mostrar como error */ }
-      else setError(t('errTranscribeFailed'));
+      if (code === 'speech-recognition-empty') {
+        // Silencio: no es un error real, solo no hubo nada que mandar — sigue escuchando.
+        transcript = '';
+      } else {
+        console.error('[Calivia] runVoiceTurnNative falló:', err);
+        if (code === 'speech-recognition-permission-denied') setError(t('errMicPermission'));
+        else if (code === 'speech-recognition-unavailable') setError(t('errNoVoiceSupport'));
+        else setError(t('errTranscribeFailed'));
+        transcript = null;
+      }
     } finally {
       setRecording(false);
     }
+
+    if (transcript === null) {
+      stopVoiceMode();
+      return;
+    }
+    if (!voiceModeRef.current) return;
+    const text = transcript.trim();
+    if (text) {
+      setInput(text);
+      await send(null, text, true);
+    }
   }
 
-  async function startVoiceInputWeb() {
+  async function runVoiceTurnWeb(): Promise<void> {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition as SpeechRecognitionConstructor;
     if (!SR) {
-      console.error('[Calivia] startVoiceInputWeb: SpeechRecognition no está disponible en este navegador.');
+      console.error('[Calivia] runVoiceTurnWeb: SpeechRecognition no está disponible en este navegador.');
       setError(t('errNoVoiceSupport'));
+      stopVoiceMode();
       return;
     }
 
+    let micGranted = false;
     try {
-      const micGranted = await ensureMicPermission();
-      if (!micGranted) {
-        setError(t('errMicPermission'));
-        return;
-      }
+      micGranted = await ensureMicPermission();
+    } catch (err) {
+      console.error('[Calivia] ensureMicPermission falló:', err);
+    }
+    if (!micGranted) {
+      setError(t('errMicPermission'));
+      stopVoiceMode();
+      return;
+    }
+    if (!voiceModeRef.current) return;
 
-      const recognition = new SR();
-      recognition.lang = SPEECH_LANG_TAG[lang];
-      recognition.continuous = false;
-      recognition.interimResults = true;
+    // null = error duro (hay que apagar el modo voz); string (posiblemente
+    // vacío) = lo transcrito, incluso si no se dijo nada por silencio.
+    const transcript = await new Promise<string | null>((resolve) => {
+      try {
+        const recognition = new SR();
+        recognition.lang = SPEECH_LANG_TAG[lang];
+        recognition.continuous = false;
+        recognition.interimResults = true;
 
-      let finalTranscript = '';
+        let finalTranscript = '';
+        let hardError = false;
 
-      // Puente nativo de audio: en algunos dispositivos Android el motor de
-      // reconocimiento se queda "escuchando" en silencio para siempre sin
-      // disparar ni onresult ni onerror ni onend (p. ej. si el servicio de
-      // reconocimiento del sistema no responde). Sin este vigía, el botón
-      // quedaría atrapado indefinidamente en el estado de grabación.
-      const watchdog = window.setTimeout(() => {
-        console.error('[Calivia] SpeechRecognition no dio señales de vida a tiempo; forzando detención.');
-        try { recognition.stop(); } catch { /* ignore */ }
-        setError(t('errMicNoResponse'));
-        setRecording(false);
-        recognitionRef.current = null;
-      }, 10000);
+        // Puente nativo de audio: en algunos dispositivos Android el motor de
+        // reconocimiento se queda "escuchando" en silencio para siempre sin
+        // disparar ni onresult ni onerror ni onend (p. ej. si el servicio de
+        // reconocimiento del sistema no responde). Sin este vigía, el botón
+        // quedaría atrapado indefinidamente en el estado de grabación.
+        const watchdog = window.setTimeout(() => {
+          console.error('[Calivia] SpeechRecognition no dio señales de vida a tiempo; forzando detención.');
+          try { recognition.stop(); } catch { /* ignore */ }
+          setError(t('errMicNoResponse'));
+          hardError = true;
+          setRecording(false);
+          recognitionRef.current = null;
+        }, 10000);
 
-      (recognition as any).onstart = () => {
-        console.info('[Calivia] SpeechRecognition: sesión iniciada correctamente.');
-      };
+        (recognition as any).onstart = () => {
+          console.info('[Calivia] SpeechRecognition: sesión iniciada correctamente.');
+        };
 
-      recognition.onresult = (e: SpeechRecognitionEvent) => {
-        let interim = '';
-        for (let i = 0; i < e.results.length; i++) {
-          const result = e.results[i];
-          if (result.length > 0) {
-            const transcript = result[0].transcript;
-            if (i === e.results.length - 1 && typeof (result as any).isFinal === 'boolean' && (result as any).isFinal) {
-              finalTranscript += transcript;
-            } else {
-              interim += transcript;
+        recognition.onresult = (e: SpeechRecognitionEvent) => {
+          let interim = '';
+          for (let i = 0; i < e.results.length; i++) {
+            const result = e.results[i];
+            if (result.length > 0) {
+              const transcriptPart = result[0].transcript;
+              if (i === e.results.length - 1 && typeof (result as any).isFinal === 'boolean' && (result as any).isFinal) {
+                finalTranscript += transcriptPart;
+              } else {
+                interim += transcriptPart;
+              }
             }
           }
-        }
-        setInput(finalTranscript + interim);
-      };
+          setInput(finalTranscript + interim);
+        };
 
-      recognition.onerror = (e: Event) => {
-        const errEvent = e as any;
-        console.error('[Calivia] SpeechRecognition onerror:', errEvent.error);
-        window.clearTimeout(watchdog);
-        if (errEvent.error === 'not-allowed' || errEvent.error === 'service-not-allowed') {
-          setError(t('errMicNotAllowed'));
-        } else if (errEvent.error !== 'no-speech' && errEvent.error !== 'aborted') {
-          setError(t('errTranscribeFailed'));
-        }
+        recognition.onerror = (e: Event) => {
+          const errEvent = e as any;
+          console.error('[Calivia] SpeechRecognition onerror:', errEvent.error);
+          window.clearTimeout(watchdog);
+          if (errEvent.error === 'not-allowed' || errEvent.error === 'service-not-allowed') {
+            setError(t('errMicNotAllowed'));
+            hardError = true;
+          } else if (errEvent.error !== 'no-speech' && errEvent.error !== 'aborted') {
+            setError(t('errTranscribeFailed'));
+            hardError = true;
+          }
+          setRecording(false);
+          recognitionRef.current = null;
+        };
+
+        recognition.onend = () => {
+          window.clearTimeout(watchdog);
+          setRecording(false);
+          recognitionRef.current = null;
+          resolve(hardError ? null : finalTranscript);
+        };
+
+        recognitionRef.current = recognition;
+        setRecording(true);
+        setError(null);
+        recognition.start();
+      } catch (err) {
+        console.error('[Calivia] runVoiceTurnWeb falló inesperadamente:', err);
+        setError(t('errVoiceInputFailed'));
         setRecording(false);
         recognitionRef.current = null;
-      };
+        resolve(null);
+      }
+    });
 
-      recognition.onend = () => {
-        window.clearTimeout(watchdog);
-        setRecording(false);
-        recognitionRef.current = null;
-        // Deja el texto transcrito en el input para que la persona lo revise
-        // y lo edite si quiere — el envío queda en sus manos, con un toque.
-        if (finalTranscript.trim()) pendingVoiceReplyRef.current = true;
-      };
-
-      recognitionRef.current = recognition;
-      setRecording(true);
-      setError(null);
-      recognition.start();
-    } catch (err) {
-      console.error('[Calivia] startVoiceInput falló inesperadamente:', err);
-      setError(t('errVoiceInputFailed'));
-      setRecording(false);
-      recognitionRef.current = null;
+    if (transcript === null) {
+      stopVoiceMode();
+      return;
+    }
+    if (!voiceModeRef.current) return;
+    const text = transcript.trim();
+    if (text) {
+      await send(null, text, true);
     }
   }
 
-  async function send(e: React.FormEvent | null, overrideText?: string, isVoice?: boolean) {
+  async function send(e: React.FormEvent | null, overrideText?: string, isVoice: boolean = false) {
     e?.preventDefault();
     const text = (overrideText ?? input).trim();
     if (!text || limitReached) return;
-    // Si no se especifica explícitamente (p. ej. los chips rápidos siempre
-    // mandan `false`), el envío desde el formulario/Enter hereda si el texto
-    // actual vino de un dictado por voz — ver pendingVoiceReplyRef arriba.
-    const voiceReply = isVoice ?? pendingVoiceReplyRef.current;
-    pendingVoiceReplyRef.current = false;
+    // Si la persona escribe o toca enviar/un chip a mano mientras el modo voz
+    // está prendido, eso es una intervención manual: apaga el modo voz en vez
+    // de dejarlo corriendo en paralelo (evita una posible doble escucha/envío).
+    // El propio bucle de voz es el único que llama a send() con isVoice=true.
+    if (voiceModeRef.current && !isVoice) {
+      stopVoiceMode();
+    }
     stopRecognition();
     setError(null);
     setInput('');
@@ -632,7 +732,6 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       setError(err instanceof Error ? localizeBackendError(err.message, lang) : t('errUnexpected'));
       setMessages((m) => m.filter((x) => x.id !== tempId));
       setInput(text);
-      pendingVoiceReplyRef.current = voiceReply;
       if (!fragmentTimerRef.current) chainActiveRef.current = false;
       return;
     }
@@ -646,18 +745,18 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       const ack = BURST_ACK_REPLIES[lang][ackIndexRef.current % BURST_ACK_REPLIES[lang].length];
       ackIndexRef.current++;
       setMessages((m) => [...m, { id: `ack-${Date.now()}`, user_id: userId, role: 'assistant', content: ack, created_at: new Date().toISOString() }]);
-      pendingFragmentRef.current = { text, isVoice: voiceReply };
+      pendingFragmentRef.current = { text, isVoice };
       fragmentTimerRef.current = window.setTimeout(async () => {
         fragmentTimerRef.current = null;
         pendingFragmentRef.current = null;
         ackIndexRef.current = 0;
-        await callAssistant(text, voiceReply);
+        await callAssistant(text, isVoice);
         if (!fragmentTimerRef.current) chainActiveRef.current = false;
       }, FRAGMENT_QUIET_MS);
       return;
     }
 
-    await callAssistant(text, voiceReply);
+    await callAssistant(text, isVoice);
     if (!fragmentTimerRef.current) chainActiveRef.current = false;
   }
 
@@ -697,7 +796,9 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       setMessages((m) => [...m, assistantLog]);
 
       if (isVoice) {
-        speakResponse(reply);
+        // El modo voz espera a que termine de hablar antes de volver a
+        // escuchar (ver runVoiceTurn) — por eso se espera acá también.
+        await speakResponse(reply);
       }
     } catch (err) {
       const msg = err instanceof Error ? localizeBackendError(err.message, lang) : t('errUnexpected');
@@ -835,7 +936,12 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={limitReached ? t('inputPlaceholderLimit') : recording ? t('inputPlaceholderListening') : t('inputPlaceholderDefault')}
+          placeholder={
+            limitReached ? t('inputPlaceholderLimit')
+              : recording ? t('inputPlaceholderListening')
+              : voiceModeActive ? t('inputPlaceholderVoiceMode')
+              : t('inputPlaceholderDefault')
+          }
           disabled={limitReached || onboarding}
           aria-label={t('inputAria')}
           rows={1}
@@ -846,10 +952,11 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         {VOICE_INPUT_ENABLED && (
           <button
             type="button"
-            className={`mic-btn ${recording ? 'rec' : ''} ${!voiceSupported ? 'disabled' : ''}`}
-            onClick={startVoiceInput}
+            className={`mic-btn ${voiceModeActive ? 'voice-active' : ''} ${recording ? 'rec' : ''} ${!voiceSupported ? 'disabled' : ''}`}
+            onClick={toggleVoiceMode}
             disabled={limitReached || !voiceSupported || onboarding}
-            aria-label={recording ? t('stopRecording') : t('speakToMic')}
+            aria-pressed={voiceModeActive}
+            aria-label={voiceModeActive ? t('stopRecording') : t('speakToMic')}
             title={voiceSupported ? t('micTitleSupported') : t('micTitleUnsupported')}
           >
             <Mic size={18} strokeWidth={2} />
@@ -1025,16 +1132,20 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         }
         .mic-btn:hover:not(:disabled) { background: var(--muted); color: var(--primary); }
         .mic-btn:active:not(:disabled) { transform: scale(0.86); }
+        .mic-btn.voice-active {
+          background: var(--primary); color: #fff;
+          border-color: var(--primary);
+        }
         .mic-btn.rec {
-          background: var(--secondary); color: #fff;
-          border-color: var(--secondary);
-          box-shadow: 0 0 0 0 rgba(140,138,126,0.4);
+          background: var(--primary); color: #fff;
+          border-color: var(--primary);
+          box-shadow: 0 0 0 0 rgba(112,130,56,0.4);
           animation: breathe 1.5s ease-in-out infinite, micRing 1.5s ease-out infinite;
         }
         @keyframes micRing {
-          0% { box-shadow: 0 0 0 0 rgba(140,138,126,0.35); }
-          70% { box-shadow: 0 0 0 12px rgba(140,138,126,0); }
-          100% { box-shadow: 0 0 0 0 rgba(140,138,126,0); }
+          0% { box-shadow: 0 0 0 0 rgba(112,130,56,0.35); }
+          70% { box-shadow: 0 0 0 12px rgba(112,130,56,0); }
+          100% { box-shadow: 0 0 0 0 rgba(112,130,56,0); }
         }
         .mic-btn.disabled { opacity: 0.35; cursor: not-allowed; }
         .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }

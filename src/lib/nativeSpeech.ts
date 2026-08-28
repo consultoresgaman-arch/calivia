@@ -94,6 +94,28 @@ function pickNativeVoiceIndex(voices: NativeVoiceLike[], langTag: string): numbe
   return pool.slice().sort((a, b) => scoreNativeVoice(b.voice, short) - scoreNativeVoice(a.voice, short))[0].index;
 }
 
+// Corta en seco una escucha nativa en curso (usado al apagar el modo voz
+// mientras el SpeechRecognizer de Android todavía está esperando que la
+// persona termine de hablar) — sin esto, listenOnceNative() solo se resuelve
+// cuando el reconocedor decide solo que terminó.
+export async function stopNativeListening(): Promise<void> {
+  try {
+    await SpeechRecognition.stop();
+  } catch (err) {
+    console.error('[Calivia] stopNativeListening falló:', err);
+  }
+}
+
+// Corta en seco una respuesta hablada en curso (usado al apagar el modo voz
+// mientras Calivia todavía está leyendo su respuesta).
+export async function stopNativeSpeech(): Promise<void> {
+  try {
+    await TextToSpeech.stop();
+  } catch (err) {
+    console.error('[Calivia] stopNativeSpeech falló:', err);
+  }
+}
+
 export async function speakNative(text: string, langTag: string): Promise<void> {
   let voiceIndex: number | undefined;
   try {
