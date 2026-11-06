@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from './supabase';
 import { getSessionToken, setSessionToken } from './session';
+import { callSecureAuth } from './secureAuth';
 import type { Profile, Role } from './types';
 
 interface AuthState {
@@ -96,12 +97,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signIn(name: string, password: string) {
-    const { data, error } = await supabase
-      .rpc('login_profile', { p_name: name, p_password: password })
-      .single<ProfileRowWithSession>();
-    if (error) throw error;
-    setSessionToken(data.session_token);
-    setState({ profile: rowToProfile(data), loading: false });
+    const { profile } = await callSecureAuth<{ profile: ProfileRowWithSession }>('login', { name, password });
+    setSessionToken(profile.session_token);
+    setState({ profile: rowToProfile(profile), loading: false });
   }
 
   async function signOut() {

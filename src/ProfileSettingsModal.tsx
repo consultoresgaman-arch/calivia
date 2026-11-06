@@ -39,6 +39,11 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
+  const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [savingRecoveryEmail, setSavingRecoveryEmail] = useState(false);
+  const [recoveryEmailMessage, setRecoveryEmailMessage] = useState<string | null>(null);
+  const [recoveryEmailError, setRecoveryEmailError] = useState<string | null>(null);
+
   const isPsychologist = profile?.role === 'psychologist';
 
   useEffect(() => {
@@ -62,6 +67,9 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     setConfirmPassword('');
     setPasswordMessage(null);
     setPasswordError(null);
+    setRecoveryEmail('');
+    setRecoveryEmailMessage(null);
+    setRecoveryEmailError(null);
     getAvatarSignedUrl(profile.avatar_path).then(setAvatarUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -157,6 +165,22 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     }
   }
 
+  async function handleSaveRecoveryEmail() {
+    setRecoveryEmailMessage(null);
+    setRecoveryEmailError(null);
+    setSavingRecoveryEmail(true);
+    try {
+      const { error } = await supabase.rpc('set_recovery_email', { p_email: recoveryEmail.trim() });
+      if (error) throw new Error(error.message);
+      setRecoveryEmail('');
+      setRecoveryEmailMessage(t('alertEmailSaved'));
+    } catch (err) {
+      setRecoveryEmailError(err instanceof Error ? localizeBackendError(err.message, lang) : t('saveFailed'));
+    } finally {
+      setSavingRecoveryEmail(false);
+    }
+  }
+
   return (
     <div className="psm-overlay">
       <div className="psm-bar">
@@ -238,6 +262,27 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
               <span><HeartHandshake size={14} strokeWidth={2} /> {t('personaNameAcompananteLabel')}</span>
               <input type="text" value={personaNameAcompanante} onChange={(e) => setPersonaNameAcompanante(e.target.value)} placeholder={t('personaNameAcompanantePlaceholder')} maxLength={30} />
             </label>
+          </div>
+        )}
+
+        {isPsychologist && (
+          <div className="psm-fields">
+            <h3 className="psm-subtitle">{t('alertEmailTitle')}</h3>
+            <p className="psm-hint">{t('alertEmailHint')}</p>
+            <label className="psm-field">
+              <span>{t('alertEmailLabel')}</span>
+              <input type="email" autoComplete="email" value={recoveryEmail} onChange={(e) => setRecoveryEmail(e.target.value)} placeholder={t('alertEmailPlaceholder')} />
+            </label>
+            {recoveryEmailError && <p className="psm-message psm-message-error">{recoveryEmailError}</p>}
+            {recoveryEmailMessage && <p className="psm-message">{recoveryEmailMessage}</p>}
+            <button
+              className="psm-save"
+              onClick={handleSaveRecoveryEmail}
+              disabled={savingRecoveryEmail || !recoveryEmail.trim()}
+              type="button"
+            >
+              {savingRecoveryEmail ? t('alertEmailSaving') : t('alertEmailSave')}
+            </button>
           </div>
         )}
 

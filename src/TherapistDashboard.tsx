@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, LogOut, Calendar, FileText, Users, UserPlus, UserMinus, AlertTriangle, Check, UserCog, NotebookPen, ClipboardList, Flame } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { getSessionToken } from './lib/session';
+import { callSecureAuth } from './lib/secureAuth';
 import { useAuth } from './lib/auth';
 import { getAvatarSignedUrl } from './lib/avatar';
 import ProfileSettingsModal from './ProfileSettingsModal';
@@ -14,6 +15,11 @@ interface ChatActivity {
   user_id: string;
   activity_date: string;
 }
+
+// Columnas explícitas: el cliente no tiene permiso de lectura sobre password_hash,
+// recovery_email ni los datos de facturación, y select('*') fallaría.
+const PATIENT_COLUMNS =
+  'id, full_name, role, country, is_premium, created_at, avatar_path, phone, license_number, bio, preferred_name, occupation, terms_accepted_at, terms_version, persona_name_espejo, persona_name_amigo, persona_name_acompanante';
 
 const DISCLAIMER =
   'La interpretación clínica final corresponde siempre al profesional. Este reporte es un apoyo analítico, no un diagnóstico.';
@@ -83,7 +89,7 @@ export default function TherapistDashboard() {
     (async () => {
       const [rep, pat, chk, chat, alr] = await Promise.all([
         supabase.from('ai_reports').select('*').order('report_date', { ascending: false }),
-        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        supabase.from('profiles').select(PATIENT_COLUMNS).order('created_at', { ascending: false }),
         supabase.from('checkins').select('*').order('created_at', { ascending: false }).limit(500),
         // Nunca el contenido del chat, solo en qué fechas hubo actividad —
         // ver patient_chat_activity_dates() y el comentario junto a ChatActivity.
@@ -238,14 +244,13 @@ export default function TherapistDashboard() {
     setConfirmError(null);
     setConfirmSentMsg(null);
     try {
-      const { data, error } = await supabase.rpc('confirm_patient_link_code', { p_patient_name: name, p_code: code }).single<{ id: string; full_name: string }>();
-      if (error) throw error;
-      setConfirmSentMsg(`Vínculo confirmado con ${data.full_name}.`);
+      const { patient } = await callSecureAuth<{ patient: { id: string; full_name: string } }>('confirm-link', { patientName: name, code });
+      setConfirmSentMsg(`Vínculo confirmado con ${patient.full_name}.`);
       setConfirmName('');
       setConfirmCode('');
       // El paciente recién ahora aparece en la lista (RLS lo exige):
       // recargamos perfiles para que se refleje sin esperar a un F5 manual.
-      const { data: pat } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+      const { data: pat } = await supabase.from('profiles').select(PATIENT_COLUMNS).order('created_at', { ascending: false });
       setPatients((pat ?? []).filter((p) => p.role === 'patient'));
     } catch (err) {
       setConfirmError(err instanceof Error ? err.message : 'No se pudo confirmar el vínculo');

@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { useAuth } from './lib/auth';
-import { supabase } from './lib/supabase';
+import { callSecureAuth } from './lib/secureAuth';
 import { useLanguage, useT, localizeBackendError } from './lib/i18n';
 import LanguageSelector from './LanguageSelector';
-import type { Role } from './lib/types';
 import strings from './AuthPage.i18n';
 
 type Mode = 'signin' | 'signup' | 'forgot';
@@ -15,7 +14,6 @@ export default function AuthPage() {
   const [mode, setMode] = useState<Mode>('signin');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [role, setRole] = useState<Role>('patient');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,12 +56,11 @@ export default function AuthPage() {
     setError(null);
     setLoading(true);
     try {
-      const { error: rpcError } = await supabase.rpc('reset_password_with_code', {
-        p_name: forgotName,
-        p_code: resetCode.trim(),
-        p_new_password: newPassword,
+      await callSecureAuth('reset-password', {
+        name: forgotName,
+        code: resetCode.trim(),
+        newPassword,
       });
-      if (rpcError) throw rpcError;
       setFullName(forgotName);
       setPassword('');
       setForgotMessage(t('passwordUpdated'));
@@ -83,7 +80,7 @@ export default function AuthPage() {
       if (mode === 'signin') {
         await signIn(fullName, password);
       } else {
-        await signUp(fullName, password, role);
+        await signUp(fullName, password, 'patient');
       }
     } catch (err) {
       const msg = err instanceof Error ? localizeBackendError(err.message, lang) : t('unexpectedError');
@@ -188,28 +185,6 @@ export default function AuthPage() {
               />
             </label>
 
-            {mode === 'signup' && (
-              <div className="auth-field">
-                <span>{t('roleLabel')}</span>
-                <div className="role-row">
-                  <button
-                    type="button"
-                    className={`arole ${role === 'patient' ? 'active' : ''}`}
-                    onClick={() => setRole('patient')}
-                  >
-                    {t('rolePatient')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`arole ${role === 'psychologist' ? 'active' : ''}`}
-                    onClick={() => setRole('psychologist')}
-                  >
-                    {t('roleSpecialist')}
-                  </button>
-                </div>
-              </div>
-            )}
-
             <label className="auth-field">
               <span>{t('passwordLabel')}</span>
               <input
@@ -221,6 +196,8 @@ export default function AuthPage() {
                 placeholder={t('passwordPlaceholder')}
               />
             </label>
+
+            {mode === 'signup' && <p className="auth-hint">{t('specialistSignupNote')}</p>}
 
             {mode === 'signin' && (
               <button type="button" className="auth-forgot-link" onClick={() => switchMode('forgot')}>
@@ -311,23 +288,6 @@ export default function AuthPage() {
           transition: border-color 0.15s, background 0.15s;
         }
         .auth-field input:focus { border-color: var(--primary); background: var(--surface); outline: none; }
-
-        .role-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        .arole {
-          padding: 11px;
-          border: 1px solid var(--border);
-          background: var(--surface-2);
-          border-radius: var(--radius-sm);
-          color: var(--text-soft);
-          font-size: 14px; font-weight: 600;
-          cursor: pointer;
-          transition: all 0.15s;
-        }
-        .arole.active {
-          border-color: var(--primary);
-          color: var(--primary-600);
-          background: rgba(176,125,92,0.08);
-        }
 
         .auth-btn {
           margin-top: 4px;

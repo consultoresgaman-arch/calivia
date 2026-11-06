@@ -55,6 +55,10 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const [pendingLinks, setPendingLinks] = useState<{ psychologistId: string; name: string }[]>([]);
   const [linkActionId, setLinkActionId] = useState<string | null>(null);
   const [approvalCode, setApprovalCode] = useState<{ name: string; code: string } | null>(null);
+  const [linkedProfessional, setLinkedProfessional] = useState<string | null>(null);
+  const [confirmingRevoke, setConfirmingRevoke] = useState(false);
+  const [revokingLink, setRevokingLink] = useState(false);
+  const [revokeError, setRevokeError] = useState(false);
   const today = new Date().toISOString().slice(0, 10);
   const isPremium = !!profile?.is_premium;
   const maxFree = isPremium ? Infinity : MAX_FREE_MESSAGES;
@@ -108,7 +112,29 @@ export default function PatientDashboard({ onExitToHome }: Props) {
     })));
   }
 
-  useEffect(() => { loadPendingLinks(); }, []);
+  async function loadLinkedProfessional() {
+    const { data: link } = await supabase
+      .from('patient_links')
+      .select('psychologist_id')
+      .eq('patient_id', profile!.id)
+      .eq('status', 'accepted')
+      .maybeSingle();
+    if (!link) { setLinkedProfessional(null); return; }
+    const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', link.psychologist_id).maybeSingle();
+    setLinkedProfessional(prof?.full_name ?? t('defaultProfessional'));
+  }
+
+  useEffect(() => { loadPendingLinks(); loadLinkedProfessional(); }, []);
+
+  async function revokeLink() {
+    setRevokingLink(true);
+    setRevokeError(false);
+    const { error } = await supabase.rpc('patient_revoke_link');
+    setRevokingLink(false);
+    if (error) { setRevokeError(true); return; }
+    setConfirmingRevoke(false);
+    setLinkedProfessional(null);
+  }
 
   async function respondToLink(psychologistId: string, accept: boolean) {
     setLinkActionId(psychologistId);
@@ -209,6 +235,29 @@ export default function PatientDashboard({ onExitToHome }: Props) {
                       <strong>{approvalCode.code}</strong>
                       <p>{t('approvalCodeHint')}</p>
                       <button type="button" onClick={() => setApprovalCode(null)}>{t('approvalCodeDismiss')}</button>
+                    </div>
+                  )}
+                  {linkedProfessional && (
+                    <div className="user-menu-links">
+                      <span>{t('linkedProfessionalTitle')}</span>
+                      <p>{confirmingRevoke ? t('revokeLinkConfirm', { name: linkedProfessional }) : linkedProfessional}</p>
+                      {revokeError && <p>{t('revokeLinkFailed')}</p>}
+                      <div className="user-menu-link-actions">
+                        {confirmingRevoke ? (
+                          <>
+                            <button type="button" className="user-menu-link-reject" disabled={revokingLink} onClick={revokeLink}>
+                              {t('revokeLinkYes')}
+                            </button>
+                            <button type="button" className="user-menu-link-accept" disabled={revokingLink} onClick={() => { setConfirmingRevoke(false); setRevokeError(false); }}>
+                              {t('revokeLinkCancel')}
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" className="user-menu-link-reject" onClick={() => setConfirmingRevoke(true)}>
+                            {t('revokeLink')}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                   <button className="user-menu-edit-profile" onClick={() => { setMenuOpen(false); setProfileModalOpen(true); }} type="button">

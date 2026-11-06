@@ -45,21 +45,40 @@ Deno.serve(async (req: Request) => {
       return rateLimitedResponse(corsHeaders);
     }
 
-    // Find all patients with activity on this date
+    // Solo pacientes con vínculo aceptado con quien pide el reporte, y solo
+    // actividad posterior a ese vínculo: el resto nunca consintió este análisis.
+    const { data: links, error: linksErr } = await supabase
+      .from('patient_links')
+      .select('patient_id, accepted_at')
+      .eq('psychologist_id', session.userId)
+      .eq('status', 'accepted');
+    if (linksErr) throw linksErr;
+
+    const patientIds = (links ?? []).map((l) => l.patient_id as string);
+    if (patientIds.length === 0) {
+      return new Response(JSON.stringify({ generated: 0, message: 'No hay pacientes pendientes para esta fecha.' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const acceptedAtByPatient = new Map((links ?? []).map((l) => [l.patient_id as string, l.accepted_at as string | null]));
+    const isAfterLink = (row: { user_id: string; created_at: string }) => {
+      const acceptedAt = acceptedAtByPatient.get(row.user_id);
+      return !acceptedAt || new Date(row.created_at).getTime() >= new Date(acceptedAt).getTime();
+    };
+
+    // Find linked patients with activity on this date
     const start = `${date}T00:00:00Z`;
     const end = `${date}T23:59:59Z`;
 
     const [checkinsRes, chatsRes, existingRes] = await Promise.all([
-      supabase.from('checkins').select('id, user_id, mood, message, created_at').gte('created_at', start).lte('created_at', end),
-      supabase.from('chat_logs').select('id, user_id, role, content, created_at').gte('created_at', start).lte('created_at', end),
-      supabase.from('ai_reports').select('user_id').eq('report_date', date),
+      supabase.from('checkins').select('id, user_id, mood, message, created_at').in('user_id', patientIds).gte('created_at', start).lte('created_at', end),
+      supabase.from('chat_logs').select('id, user_id, role, content, created_at').in('user_id', patientIds).gte('created_at', start).lte('created_at', end),
+      supabase.from('ai_reports').select('user_id').eq('report_date', date).in('user_id', patientIds),
     ]);
     if (checkinsRes.error || chatsRes.error || existingRes.error) {
       throw new Error(checkinsRes.error?.message || chatsRes.error?.message || existingRes.error?.message);
     }
 
-    const checkins = checkinsRes.data ?? [];
-    const chats = chatsRes.data ?? [];
+    const checkins = (checkinsRes.data ?? []).filter(isAfterLink);
+    const chats = (chatsRes.data ?? []).filter(isAfterLink);
     const already = new Set((existingRes.data ?? []).map((r) => r.user_id));
 
     const activeIds = new Set<string>([...checkins.map((c) => c.user_id), ...chats.map((c) => c.user_id)]);
