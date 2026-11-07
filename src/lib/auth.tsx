@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from './supabase';
 import { getSessionToken, setSessionToken } from './session';
 import { callSecureAuth } from './secureAuth';
@@ -8,6 +8,7 @@ import type { Profile, Role } from './types';
 interface AuthState {
   profile: Profile | null;
   loading: boolean;
+  offline: boolean;
 }
 
 interface AuthContextValue extends AuthState {
@@ -15,6 +16,29 @@ interface AuthContextValue extends AuthState {
   signUp: (name: string, password: string, role: Role) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  retrySession: () => Promise<void>;
+}
+
+const PROFILE_CACHE_KEY = 'calivia.cached_profile';
+const SESSION_CHECK_TIMEOUT_MS = 10000;
+
+// Copia del perfil para que la app y el SOS abran sin conexión.
+function readCachedProfile(): Profile | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as Profile) : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheProfile(profile: Profile | null): void {
+  try {
+    if (profile) localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
+    else localStorage.removeItem(PROFILE_CACHE_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -66,27 +90,52 @@ function rowToProfile(row: ProfileRow): Profile {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AuthState>({ profile: null, loading: true });
+  const [state, setState] = useState<AuthState>({ profile: null, loading: true, offline: false });
 
-  useEffect(() => {
-    let mounted = true;
+  function applyProfile(profile: Profile) {
+    cacheProfile(profile);
+    setState({ profile, loading: false, offline: false });
+  }
+
+  function clearSession() {
+    setSessionToken(null);
+    cacheProfile(null);
+    setState({ profile: null, loading: false, offline: false });
+  }
+
+  // Solo se cierra la sesión si el servidor responde que ya no es válida. Un fallo
+  // de red no dice nada sobre la sesión, y borrarla dejaría a la persona fuera de
+  // la app y de su SOS justo cuando no tiene conexión.
+  const restoreSession = useCallback(async () => {
     const token = getSessionToken();
     if (!token) {
-      setState({ profile: null, loading: false });
+      setState({ profile: null, loading: false, offline: false });
       return;
     }
-    (async () => {
-      const { data, error } = await supabase.rpc('resolve_session', { p_token: token }).maybeSingle<ProfileRow>();
-      if (!mounted) return;
-      if (error || !data) {
-        setSessionToken(null);
-        setState({ profile: null, loading: false });
-        return;
-      }
-      setState({ profile: rowToProfile(data), loading: false });
-    })();
-    return () => { mounted = false; };
+    const timeout = new Promise<{ data: null; error: Error }>((resolve) => {
+      window.setTimeout(() => resolve({ data: null, error: new Error('session-check-timeout') }), SESSION_CHECK_TIMEOUT_MS);
+    });
+    const { data, error } = await Promise.race([
+      supabase.rpc('resolve_session', { p_token: token }).maybeSingle<ProfileRow>(),
+      timeout,
+    ]);
+    if (error) {
+      setState({ profile: readCachedProfile(), loading: false, offline: true });
+      return;
+    }
+    if (!data) {
+      clearSession();
+      return;
+    }
+    applyProfile(rowToProfile(data));
   }, []);
+
+  useEffect(() => {
+    void restoreSession();
+    const onOnline = () => { void restoreSession(); };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [restoreSession]);
 
   async function signUp(name: string, password: string, role: Role) {
     const { data, error } = await supabase
@@ -94,20 +143,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .single<ProfileRowWithSession>();
     if (error) throw error;
     setSessionToken(data.session_token);
-    setState({ profile: rowToProfile(data), loading: false });
+    applyProfile(rowToProfile(data));
   }
 
   async function signIn(name: string, password: string) {
     const { profile } = await callSecureAuth<{ profile: ProfileRowWithSession }>('login', { name, password });
     setSessionToken(profile.session_token);
-    setState({ profile: rowToProfile(profile), loading: false });
+    applyProfile(rowToProfile(profile));
   }
 
   async function signOut() {
     const token = getSessionToken();
-    setSessionToken(null);
+    clearSession();
     clearCachedCrisisContacts();
-    setState({ profile: null, loading: false });
     if (token) await supabase.rpc('logout_session', { p_token: token });
   }
 
@@ -115,11 +163,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = getSessionToken();
     if (!token) return;
     const { data, error } = await supabase.rpc('resolve_session', { p_token: token }).maybeSingle<ProfileRow>();
-    if (!error && data) setState((s) => ({ ...s, profile: rowToProfile(data) }));
+    if (!error && data) {
+      const profile = rowToProfile(data);
+      cacheProfile(profile);
+      setState((s) => ({ ...s, profile }));
+    }
   }
 
   return (
-    <AuthContext.Provider value={{ ...state, signIn, signUp, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ ...state, signIn, signUp, signOut, refreshProfile, retrySession: restoreSession }}>
       {children}
     </AuthContext.Provider>
   );
