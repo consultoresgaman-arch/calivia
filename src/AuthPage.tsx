@@ -7,6 +7,8 @@ import strings from './AuthPage.i18n';
 
 type Mode = 'signin' | 'signup' | 'forgot';
 
+const PRIVACY_URL = 'https://calivia.vercel.app/privacidad.html';
+
 export default function AuthPage() {
   const { signIn, signUp } = useAuth();
   const { lang } = useLanguage();
@@ -14,6 +16,7 @@ export default function AuthPage() {
   const [mode, setMode] = useState<Mode>('signin');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [isAdult, setIsAdult] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -197,7 +200,16 @@ export default function AuthPage() {
               />
             </label>
 
-            {mode === 'signup' && <p className="auth-hint">{t('specialistSignupNote')}</p>}
+            {mode === 'signup' && (
+              <>
+                <label className="auth-check">
+                  <input type="checkbox" required checked={isAdult} onChange={(e) => setIsAdult(e.target.checked)} />
+                  <span>{t('confirmAdult')}</span>
+                </label>
+                <a className="auth-policy" href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">{t('privacyPolicy')}</a>
+                <p className="auth-hint">{t('specialistSignupNote')}</p>
+              </>
+            )}
 
             {mode === 'signin' && (
               <button type="button" className="auth-forgot-link" onClick={() => switchMode('forgot')}>
@@ -321,6 +333,10 @@ export default function AuthPage() {
           background: var(--surface-2); padding: 10px 14px; border-radius: var(--radius-sm);
           line-height: 1.5;
         }
+
+        .auth-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--text); cursor: pointer; }
+        .auth-check input { margin-top: 2px; width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--primary); }
+        .auth-policy { align-self: flex-start; font-size: 13px; font-weight: 600; color: var(--primary-600); }
 
         .auth-error {
           background: var(--danger-bg);

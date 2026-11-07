@@ -24,7 +24,7 @@ export function soundOption(key: string) {
 }
 
 export function channelIdForSound(key: string) {
-  return `task-reminders-${soundOption(key).key}-v1`;
+  return `task-reminders-${soundOption(key).key}-v2`;
 }
 
 // Los recordatorios nativos se programan a nivel de sistema operativo (AlarmManager en
@@ -55,7 +55,7 @@ export async function ensureNotificationChannels() {
         name: `Recordatorios de tareas · ${s.key}`,
         description: 'Avisos de tareas con hora programada',
         importance: 5,
-        visibility: 1,
+        visibility: 0,
         vibration: true,
         sound: s.file,
       });
@@ -86,6 +86,14 @@ export async function scheduleTaskReminder(task: TaskItem, reminderTitle: string
         schedule: { at: new Date(dueMs), allowWhileIdle: true },
       }],
     });
+  } catch { /* ignore */ }
+}
+
+export async function cancelAllTaskReminders() {
+  if (!NATIVE) return;
+  try {
+    const { notifications } = await LocalNotifications.getPending();
+    if (notifications.length > 0) await LocalNotifications.cancel({ notifications });
   } catch { /* ignore */ }
 }
 

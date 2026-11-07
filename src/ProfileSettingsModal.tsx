@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, Camera, Loader2, Eye, Smile, HeartHandshake } from 'lucide-react';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
+import { getSessionToken } from './lib/session';
 import { uploadAvatar, getAvatarSignedUrl } from './lib/avatar';
 import { useT, useLanguage, localizeBackendError } from './lib/i18n';
 import LanguageSelector from './LanguageSelector';
@@ -13,7 +14,7 @@ interface Props {
 }
 
 export default function ProfileSettingsModal({ open, onClose }: Props) {
-  const { profile, refreshProfile } = useAuth();
+  const { profile, refreshProfile, signOut } = useAuth();
   const t = useT(strings);
   const { lang } = useLanguage();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +39,11 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
   const [changingPassword, setChangingPassword] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [savingRecoveryEmail, setSavingRecoveryEmail] = useState(false);
@@ -70,6 +76,9 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     setRecoveryEmail('');
     setRecoveryEmailMessage(null);
     setRecoveryEmailError(null);
+    setConfirmingDelete(false);
+    setDeletePassword('');
+    setDeleteError(null);
     getAvatarSignedUrl(profile.avatar_path).then(setAvatarUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -162,6 +171,30 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
       setPasswordError(err instanceof Error ? localizeBackendError(err.message, lang) : t('passwordChangeFailed'));
     } finally {
       setChangingPassword(false);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-account`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'x-session-token': getSessionToken() ?? '',
+        },
+        body: JSON.stringify({ password: deletePassword }),
+      });
+      if (res.status === 403) { setDeleteError(t('deleteWrongPassword')); return; }
+      if (!res.ok) { setDeleteError(t('deleteFailed')); return; }
+      await signOut();
+    } catch (err) {
+      console.error('[Calivia] handleDeleteAccount falló:', err);
+      setDeleteError(t('deleteFailed'));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -308,6 +341,32 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
         <button className="psm-save" onClick={handleSave} disabled={saving} type="button">
           {saving ? t('saving') : t('saveChanges')}
         </button>
+
+        <a className="psm-policy-link" href="https://calivia.vercel.app/privacidad.html" target="_blank" rel="noopener noreferrer">
+          {t('privacyPolicy')}
+        </a>
+
+        <div className="psm-fields psm-danger-zone">
+          <h3 className="psm-subtitle">{t('deleteTitle')}</h3>
+          {confirmingDelete ? (
+            <>
+              <p className="psm-hint">{t('deleteWarning')}</p>
+              <label className="psm-field">
+                <span>{t('deletePasswordLabel')}</span>
+                <input type="password" autoComplete="current-password" value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} />
+              </label>
+              {deleteError && <p className="psm-message psm-message-error">{deleteError}</p>}
+              <button className="psm-delete" onClick={handleDeleteAccount} disabled={deleting || !deletePassword} type="button">
+                {deleting ? t('deleting') : t('deleteConfirm')}
+              </button>
+              <button className="psm-delete-cancel" onClick={() => { setConfirmingDelete(false); setDeletePassword(''); setDeleteError(null); }} disabled={deleting} type="button">
+                {t('deleteCancel')}
+              </button>
+            </>
+          ) : (
+            <button className="psm-delete-cancel" onClick={() => setConfirmingDelete(true)} type="button">{t('deleteButton')}</button>
+          )}
+        </div>
       </div>
 
       <style>{`
@@ -343,6 +402,11 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
         .psm-message { margin: 0; font-size: 13px; color: var(--primary-600); font-weight: 600; }
         .psm-message-error { color: var(--danger); }
         .psm-avatar-message { text-align: center; max-width: 260px; }
+        .psm-policy-link { display: block; margin-top: 16px; font-size: 13px; font-weight: 600; color: var(--primary-600); }
+        .psm-danger-zone { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+        .psm-delete { padding: 12px; border: none; border-radius: 999px; background: var(--danger); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; }
+        .psm-delete:disabled { opacity: 0.5; cursor: default; }
+        .psm-delete-cancel { padding: 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-soft); font-size: 13px; font-weight: 600; cursor: pointer; }
         .psm-save { padding: 12px; border: none; border-radius: 999px; background: var(--primary); color: #fff; font-size: 14.5px; font-weight: 700; cursor: pointer; }
         .psm-save:hover:not(:disabled) { background: var(--primary-600); }
         .psm-save:disabled { opacity: 0.6; cursor: not-allowed; }

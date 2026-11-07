@@ -1,4 +1,5 @@
 import { StrictMode } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { AuthProvider } from './lib/auth';
@@ -6,7 +7,7 @@ import { LanguageProvider } from './lib/i18n';
 import ErrorBoundary from './ErrorBoundary';
 import './index.css';
 
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && !Capacitor.isNativePlatform()) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   });

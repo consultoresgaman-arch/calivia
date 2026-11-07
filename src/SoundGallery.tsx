@@ -1,15 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { CloudRain, HeartPulse, Wind, Lock, Play, Pause } from 'lucide-react';
-import { openCheckout } from './lib/payments';
+import { CloudRain, HeartPulse, Wind, Play, Pause } from 'lucide-react';
 import { useHeartbeatSound } from './lib/useHeartbeatSound';
 import { useT } from './lib/i18n';
 import strings from './SoundGallery.i18n';
-
-interface Props {
-  isPremium: boolean;
-  userId: string;
-  name?: string | null;
-}
 
 type SoundId = 'rain' | 'heartbeat' | 'wind';
 
@@ -18,10 +11,9 @@ interface SoundDef {
   title: string;
   desc: string;
   icon: typeof CloudRain;
-  locked: boolean;
 }
 
-export default function SoundGallery({ isPremium, userId, name }: Props) {
+export default function SoundGallery() {
   const [playing, setPlaying] = useState<SoundId | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const nodesRef = useRef<AudioNode[]>([]);
@@ -29,9 +21,9 @@ export default function SoundGallery({ isPremium, userId, name }: Props) {
   const t = useT(strings);
 
   const sounds: SoundDef[] = [
-    { id: 'rain', title: t('rainTitle'), desc: t('rainDesc'), icon: CloudRain, locked: false },
-    { id: 'heartbeat', title: t('heartbeatTitle'), desc: t('heartbeatDesc'), icon: HeartPulse, locked: !isPremium },
-    { id: 'wind', title: t('windTitle'), desc: t('windDesc'), icon: Wind, locked: !isPremium },
+    { id: 'rain', title: t('rainTitle'), desc: t('rainDesc'), icon: CloudRain },
+    { id: 'heartbeat', title: t('heartbeatTitle'), desc: t('heartbeatDesc'), icon: HeartPulse },
+    { id: 'wind', title: t('windTitle'), desc: t('windDesc'), icon: Wind },
   ];
 
   function ensureCtx(): AudioContext {
@@ -106,10 +98,6 @@ export default function SoundGallery({ isPremium, userId, name }: Props) {
   const heartbeat = useHeartbeatSound();
 
   async function toggle(sound: SoundDef) {
-    if (sound.locked) {
-      openCheckout({ userId, name });
-      return;
-    }
 
     if (sound.id === 'heartbeat') {
       stopCurrent();
@@ -153,16 +141,16 @@ export default function SoundGallery({ isPremium, userId, name }: Props) {
             <button
               key={s.id}
               type="button"
-              className={`sg-item ${isPlaying ? 'playing' : ''} ${s.locked ? 'locked' : ''}`}
+              className={`sg-item ${isPlaying ? 'playing' : ''}`}
               onClick={() => toggle(s)}
             >
               <div className="sg-item-icon"><Icon size={20} strokeWidth={1.8} /></div>
               <div className="sg-item-body">
-                <span className="sg-item-title">{s.title}{s.locked && <Lock size={12} strokeWidth={2.5} />}</span>
-                <span className="sg-item-desc">{s.locked ? t('lockedDesc') : s.desc}</span>
+                <span className="sg-item-title">{s.title}</span>
+                <span className="sg-item-desc">{s.desc}</span>
               </div>
               <div className="sg-item-action">
-                {s.locked ? <Lock size={16} strokeWidth={2} /> : isPlaying ? <Pause size={18} strokeWidth={2} /> : <Play size={18} strokeWidth={2} />}
+                {isPlaying ? <Pause size={18} strokeWidth={2} /> : <Play size={18} strokeWidth={2} />}
               </div>
             </button>
           );
@@ -180,7 +168,6 @@ export default function SoundGallery({ isPremium, userId, name }: Props) {
         .sg-item { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s; }
         .sg-item:hover { border-color: var(--primary-200); }
         .sg-item.playing { border-color: var(--primary); background: rgba(112,130,56,0.08); }
-        .sg-item.locked { opacity: 0.75; }
         .sg-item-icon { width: 40px; height: 40px; border-radius: 12px; background: rgba(112,130,56,0.1); color: var(--primary); display: grid; place-items: center; flex-shrink: 0; }
         .sg-item-body { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
         .sg-item-title { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; color: var(--text); }
