@@ -21,13 +21,13 @@ import strings, {
   MEANING_REPLY,
   DIAGNOSIS_REPLY,
   NO_ANSWER_REPLY,
-  RISK_KEYWORDS,
   MEANING_TRIGGERS,
   DIAGNOSIS_TRIGGERS,
   GRATITUDE_TRIGGERS,
   ADVICE_TRIGGERS,
   SPEECH_LANG_TAG,
 } from './AiChat.i18n';
+import { detectRiskKeyword } from './lib/riskDetection';
 
 // Nombres conocidos de voces en español cálidas/femeninas de los motores de
 // alta calidad más comunes (Google, Microsoft/Edge), para preferirlas cuando
@@ -93,17 +93,6 @@ function getTimeOfDay(): 'morning' | 'afternoon' | 'night' {
   return 'night';
 }
 
-// Mismo lexicón de riesgo del backend (supabase/functions/ai-chat/index.ts),
-// para que el protocolo de crisis funcione igual de firme incluso si esta
-// respuesta de respaldo local es la que termina usándose (sin conexión). Se
-// revisan los tres idiomas a la vez, sin importar el idioma de la interfaz.
-const ALL_RISK_KEYWORDS = [...RISK_KEYWORDS.es, ...RISK_KEYWORDS.en, ...RISK_KEYWORDS.pt];
-
-function detectRiskKeyword(text: string): boolean {
-  const normalized = text.toLowerCase();
-  return ALL_RISK_KEYWORDS.some((kw) => normalized.includes(kw));
-}
-
 function generateClientFallback(message: string, conversation: ChatLog[], lang: LanguageCode): string {
   // El protocolo de crisis va primero, incluso antes del saludo de bienvenida:
   // si el primer mensaje de la persona ya es una señal de riesgo, jamás debe
@@ -164,9 +153,10 @@ interface Props {
   messagesSent: number;
   maxFree: number;
   onMessageSent: () => void;
+  onOpenSos?: () => void;
 }
 
-export default function AiChat({ userId, name, messagesSent, maxFree, onMessageSent }: Props) {
+export default function AiChat({ userId, name, messagesSent, maxFree, onMessageSent, onOpenSos }: Props) {
   const { lang } = useLanguage();
   const t = useT(strings);
   const { profile, refreshProfile } = useAuth();
@@ -760,7 +750,8 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   async function send(e: React.FormEvent | null, overrideText?: string, isVoice: boolean = false) {
     e?.preventDefault();
     const text = (overrideText ?? input).trim();
-    if (!text || limitReached) return;
+    // El límite gratuito nunca bloquea un mensaje de riesgo: el protocolo de crisis no depende del plan.
+    if (!text || (limitReached && !detectRiskKeyword(text))) return;
     // Si la persona escribe o toca enviar/un chip a mano mientras el modo voz
     // está prendido, eso es una intervención manual: apaga el modo voz en vez
     // de dejarlo corriendo en paralelo (evita una posible doble escucha/envío).
@@ -800,6 +791,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       setError(err instanceof Error ? localizeBackendError(err.message, lang) : t('errUnexpected'));
       setMessages((m) => m.filter((x) => x.id !== tempId));
       setInput(text);
+      if (detectRiskKeyword(text)) showLocalCrisisReply();
       if (!fragmentTimerRef.current) chainActiveRef.current = false;
       return;
     }
@@ -813,19 +805,36 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       const ack = BURST_ACK_REPLIES[lang][ackIndexRef.current % BURST_ACK_REPLIES[lang].length];
       ackIndexRef.current++;
       setMessages((m) => [...m, { id: `ack-${Date.now()}`, user_id: userId, role: 'assistant', content: ack, created_at: new Date().toISOString() }]);
-      pendingFragmentRef.current = { text, isVoice };
+      // Se acumulan los fragmentos: si solo viajara el último, un mensaje de riesgo
+      // seguido de otro nunca llegaría a la detección del servidor.
+      const accumulated = pendingFragmentRef.current ? `${pendingFragmentRef.current.text}\n${text}` : text;
+      pendingFragmentRef.current = { text: accumulated, isVoice };
       fragmentTimerRef.current = window.setTimeout(async () => {
         fragmentTimerRef.current = null;
+        const pending = pendingFragmentRef.current;
         pendingFragmentRef.current = null;
         ackIndexRef.current = 0;
-        await callAssistant(text, isVoice);
+        if (pending) await callAssistant(pending.text, pending.isVoice);
         if (!fragmentTimerRef.current) chainActiveRef.current = false;
-      }, FRAGMENT_QUIET_MS);
+      }, detectRiskKeyword(accumulated) ? 0 : FRAGMENT_QUIET_MS);
       return;
     }
 
     await callAssistant(text, isVoice);
     if (!fragmentTimerRef.current) chainActiveRef.current = false;
+  }
+
+  // Sin conexión, o si el servidor no responde, el texto de crisis y las líneas de
+  // ayuda siguen disponibles porque viven dentro de la app.
+  function showLocalCrisisReply() {
+    setMessages((m) => [...m, {
+      id: `crisis-${Date.now()}`,
+      user_id: userId,
+      role: 'assistant',
+      content: CRISIS_FALLBACK_REPLY[lang],
+      created_at: new Date().toISOString(),
+    }]);
+    onOpenSos?.();
   }
 
   async function callAssistant(text: string, isVoice: boolean) {
@@ -885,6 +894,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     } catch (err) {
       const msg = err instanceof Error ? localizeBackendError(err.message, lang) : t('errUnexpected');
       setError(msg);
+      if (detectRiskKeyword(text)) showLocalCrisisReply();
     } finally {
       setSending(false);
     }
@@ -1066,7 +1076,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
               : voiceModeActive ? t('inputPlaceholderVoiceMode')
               : t('inputPlaceholderDefault')
           }
-          disabled={limitReached || onboarding}
+          disabled={onboarding}
           aria-label={t('inputAria')}
           rows={1}
           onKeyDown={(e) => {
@@ -1087,7 +1097,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
             <Mic size={18} strokeWidth={2} />
           </button>
         )}
-        <button type="submit" className="send-btn" disabled={!input.trim() || limitReached || onboarding}>
+        <button type="submit" className="send-btn" disabled={!input.trim() || onboarding || (limitReached && !detectRiskKeyword(input))}>
           <Send size={18} strokeWidth={2} />
         </button>
       </form>

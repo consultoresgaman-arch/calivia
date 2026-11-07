@@ -74,6 +74,8 @@ export interface TaskItem {
   created_at: string;
   assigned_by: string | null;
   reminder_sound: string;
+  patient_response: string | null;
+  patient_response_at: string | null;
 }
 
 export interface AiReport {

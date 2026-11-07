@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, LogOut, Calendar, FileText, Users, UserPlus, UserMinus, AlertTriangle, Check, UserCog, NotebookPen, ClipboardList, Flame } from 'lucide-react';
+import { BarChart3, LogOut, Calendar, FileText, Users, UserPlus, UserMinus, AlertTriangle, Check, UserCog, NotebookPen, ClipboardList, Flame, Video, MessageSquareText } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { getSessionToken } from './lib/session';
 import { callSecureAuth } from './lib/secureAuth';
@@ -26,6 +26,17 @@ const DISCLAIMER =
 
 const ALERT_DISCLAIMER =
   'Detección automática por palabras clave, no es una evaluación clínica de riesgo. Úsala como una señal a revisar, no como un diagnóstico.';
+
+const MEET_URL_PATTERN = /^https:\/\/meet\.google\.com\/[a-zA-Z0-9-]+(\?\S*)?$/;
+const VIDEO_LINK_VISIBLE_HOURS = 6;
+
+interface AssignedTask {
+  id: string;
+  title: string;
+  done: boolean;
+  patient_response: string | null;
+  patient_response_at: string | null;
+}
 
 const LOW_MOOD_THRESHOLD = 2;
 const LOW_MOOD_STREAK_DAYS = 3;
@@ -83,6 +94,11 @@ export default function TherapistDashboard() {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [assigningTask, setAssigningTask] = useState(false);
   const [taskAssignedMsg, setTaskAssignedMsg] = useState<string | null>(null);
+  const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([]);
+  const [meetInput, setMeetInput] = useState('');
+  const [activeMeetUrl, setActiveMeetUrl] = useState<string | null>(null);
+  const [sendingMeet, setSendingMeet] = useState(false);
+  const [meetMsg, setMeetMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -172,8 +188,72 @@ export default function TherapistDashboard() {
     return () => { mounted = false; };
   }, [selectedPatientId]);
 
+  async function loadAssignedTasks(patientId: string) {
+    const { data } = await supabase
+      .from('tasks')
+      .select('id, title, done, patient_response, patient_response_at')
+      .eq('user_id', patientId)
+      .eq('assigned_by', profile!.id)
+      .order('created_at', { ascending: false });
+    setAssignedTasks(data ?? []);
+  }
+
+  useEffect(() => {
+    setAssignedTasks([]);
+    setActiveMeetUrl(null);
+    if (!selectedPatientId || !profile) return;
+    let mounted = true;
+    void loadAssignedTasks(selectedPatientId);
+    (async () => {
+      const since = new Date(Date.now() - VIDEO_LINK_VISIBLE_HOURS * 3600000).toISOString();
+      const { data } = await supabase
+        .from('video_sessions')
+        .select('meet_url')
+        .eq('patient_id', selectedPatientId)
+        .eq('psychologist_id', profile.id)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (mounted) setActiveMeetUrl(data?.meet_url ?? null);
+    })();
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPatientId, profile?.id]);
+
+  async function sendMeetLink() {
+    const url = meetInput.trim();
+    if (!selectedPatientId || !profile || sendingMeet) return;
+    if (!MEET_URL_PATTERN.test(url)) {
+      setMeetMsg('Pega un enlace válido de Google Meet (https://meet.google.com/...).');
+      return;
+    }
+    setSendingMeet(true);
+    setMeetMsg(null);
+    const { error } = await supabase
+      .from('video_sessions')
+      .insert({ patient_id: selectedPatientId, psychologist_id: profile.id, meet_url: url });
+    setSendingMeet(false);
+    if (error) { setMeetMsg('No se pudo enviar el enlace.'); return; }
+    setActiveMeetUrl(url);
+    setMeetInput('');
+    setMeetMsg('Enlace enviado. El paciente verá el botón para unirse.');
+  }
+
+  async function endMeetLink() {
+    if (!selectedPatientId || !profile) return;
+    const { error } = await supabase
+      .from('video_sessions')
+      .delete()
+      .eq('patient_id', selectedPatientId)
+      .eq('psychologist_id', profile.id);
+    if (error) { setMeetMsg('No se pudo quitar el enlace.'); return; }
+    setActiveMeetUrl(null);
+    setMeetMsg('Enlace retirado.');
+  }
+
   function togglePatientPanel(patientId: string) {
-    setNewNote(''); setNewTaskTitle(''); setTaskAssignedMsg(null);
+    setNewNote(''); setNewTaskTitle(''); setTaskAssignedMsg(null); setMeetInput(''); setMeetMsg(null);
     setSelectedPatientId((prev) => (prev === patientId ? null : patientId));
   }
 
@@ -207,6 +287,7 @@ export default function TherapistDashboard() {
       if (error) throw error;
       setNewTaskTitle('');
       setTaskAssignedMsg('Consigna enviada.');
+      await loadAssignedTasks(selectedPatientId);
     } catch (err) {
       setTaskAssignedMsg(err instanceof Error ? err.message : 'No se pudo asignar');
     } finally {
@@ -500,6 +581,50 @@ export default function TherapistDashboard() {
                 </div>
                 {taskAssignedMsg && <p className="th-task-msg">{taskAssignedMsg}</p>}
               </div>
+
+              <div className="th-panel-col">
+                <h4><MessageSquareText size={14} strokeWidth={2} /> Respuestas a consignas</h4>
+                <p className="th-panel-hint">Solo las tareas que asignaste tú.</p>
+                <div className="th-notes-list">
+                  {assignedTasks.length === 0 ? (
+                    <p className="th-empty-inline">Sin consignas asignadas.</p>
+                  ) : (
+                    assignedTasks.map((task) => (
+                      <div key={task.id} className="th-note-item">
+                        <strong className="th-response-title">{task.title}</strong>
+                        <p>{task.patient_response || 'Sin respuesta todavía.'}</p>
+                        {task.patient_response_at && <span>{new Date(task.patient_response_at).toLocaleString('es-CL')}</span>}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="th-panel-col">
+                <h4><Video size={14} strokeWidth={2} /> Videollamada</h4>
+                <p className="th-panel-hint">Crea la reunión en Google Meet, copia el enlace y pégalo aquí. El paciente verá un botón para unirse.</p>
+                <a className="th-btn-primary th-meet-open" href="https://meet.google.com/new" target="_blank" rel="noopener noreferrer">
+                  <Video size={15} strokeWidth={2} /><span>Crear reunión en Meet</span>
+                </a>
+                <div className="th-note-form">
+                  <input
+                    type="url"
+                    value={meetInput}
+                    onChange={(e) => setMeetInput(e.target.value)}
+                    placeholder="https://meet.google.com/abc-defg-hij"
+                  />
+                  <button type="button" className="th-btn-primary" onClick={sendMeetLink} disabled={sendingMeet || !meetInput.trim()}>
+                    {sendingMeet ? 'Enviando…' : 'Enviar enlace al paciente'}
+                  </button>
+                </div>
+                {activeMeetUrl && (
+                  <div className="th-note-item">
+                    <a href={activeMeetUrl} target="_blank" rel="noopener noreferrer">Entrar a la videollamada</a>
+                    <button type="button" className="th-meet-end" onClick={endMeetLink}>Quitar enlace</button>
+                  </div>
+                )}
+                {meetMsg && <p className="th-task-msg">{meetMsg}</p>}
+              </div>
             </div>
           )}
         </section>
@@ -636,6 +761,9 @@ export default function TherapistDashboard() {
           .th-note-form { display: flex; flex-direction: column; gap: 8px; }
           .th-note-form textarea, .th-note-form input { font: inherit; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); resize: vertical; }
           .th-note-form textarea:focus, .th-note-form input:focus { border-color: var(--primary); outline: none; }
+          .th-response-title { display: block; margin-bottom: 4px; font-size: 12.5px; color: var(--text); }
+          .th-meet-open { justify-content: center; text-decoration: none; }
+          .th-meet-end { display: block; margin-top: 6px; padding: 0; border: none; background: transparent; color: var(--text-soft); font-size: 12px; text-decoration: underline; cursor: pointer; }
           .th-task-msg { margin: 0; font-size: 12.5px; color: var(--primary-600); font-weight: 600; }
 
           .th-alerts-card { border-color: rgba(196,91,74,0.3); }

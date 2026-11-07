@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, CalendarClock, CloudRain, NotebookPen, UserCog, HeartPulse } from 'lucide-react';
+import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, CalendarClock, CloudRain, NotebookPen, UserCog, HeartPulse, Video } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useAuth } from './lib/auth';
 import { getAvatarSignedUrl } from './lib/avatar';
@@ -23,6 +23,7 @@ import { initVoiceShortcut, voiceShortcutReady, wasLaunchedFromVoiceShortcut, on
 import strings from './PatientDashboard.i18n';
 
 const MAX_FREE_MESSAGES = 20;
+const VIDEO_LINK_VISIBLE_HOURS = 6;
 
 type Section = 'chat' | 'breathe' | 'games' | 'progress' | 'tasks' | 'sounds' | 'journal';
 
@@ -59,6 +60,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const [revokingLink, setRevokingLink] = useState(false);
   const [revokeError, setRevokeError] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const isPremium = !!profile?.is_premium;
   const maxFree = isPremium ? Infinity : MAX_FREE_MESSAGES;
@@ -125,6 +127,33 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   }
 
   useEffect(() => { loadPendingLinks(); loadLinkedProfessional(); }, []);
+
+  // Se consulta al abrir y al volver a la app: el especialista puede enviar el enlace
+  // mientras la persona tiene Calivia en segundo plano.
+  useEffect(() => {
+    let mounted = true;
+    async function loadVideoSession() {
+      const since = new Date(Date.now() - VIDEO_LINK_VISIBLE_HOURS * 3600000).toISOString();
+      const { data } = await supabase
+        .from('video_sessions')
+        .select('meet_url')
+        .eq('patient_id', profile!.id)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (mounted) setVideoUrl(data?.meet_url ?? null);
+    }
+    function onVisible() {
+      if (document.visibilityState === 'visible') void loadVideoSession();
+    }
+    void loadVideoSession();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      mounted = false;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [profile?.id]);
 
   async function revokeLink() {
     setRevokingLink(true);
@@ -290,6 +319,13 @@ export default function PatientDashboard({ onExitToHome }: Props) {
       </header>
 
       <main className="refugio">
+        {videoUrl && (
+          <a className="video-join" href={videoUrl} target="_blank" rel="noopener noreferrer">
+            <Video size={18} strokeWidth={2} />
+            <span>{t('videoJoin')}</span>
+          </a>
+        )}
+
         {section === 'chat' && showCheckIn && (
           <QuickCheckIn userId={profile!.id} onDismiss={() => setShowCheckIn(false)} />
         )}
@@ -337,6 +373,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
               messagesSent={messagesSent}
               maxFree={maxFree}
               onMessageSent={() => setMessagesSent((n) => n + 1)}
+              onOpenSos={() => setSosOpen(true)}
             />
           </div>
         )}
@@ -454,6 +491,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         .user-menu-info { padding-bottom: 10px; border-bottom: 1px solid var(--border-soft); margin-bottom: 10px; }
         .user-menu-name { font-size: 14px; font-weight: 700; }
         .user-menu-email { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
+        .video-join { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px; padding: 13px 16px; border-radius: 14px; background: var(--primary); color: #fff; font-size: 15px; font-weight: 700; text-decoration: none; }
         .user-menu-links { display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border-soft); }
         .user-menu-links > span { font-size: 12px; font-weight: 700; color: var(--text); }
         .user-menu-link-row { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 10px; background: var(--surface-2); }
