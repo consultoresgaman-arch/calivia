@@ -1,4 +1,5 @@
 import type { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+import { sendPushToUser } from './push.ts';
 
 // Protocolo de crisis compartido por el chat, el diario y las respuestas a consignas.
 export type Lang = 'es' | 'en' | 'pt';
@@ -447,6 +448,8 @@ export async function maybeCreateRiskAlert(supabase: ReturnType<typeof createCli
       message_excerpt: excerpt,
       treatment_suggestion: suggestion,
     });
+
+    await sendPushToUser(supabase, link.psychologist_id as string, 'crisis');
 
     const [{ data: patientProfile }, { data: psychProfile }] = await Promise.all([
       supabase.from('profiles').select('full_name, preferred_name').eq('id', userId).maybeSingle(),

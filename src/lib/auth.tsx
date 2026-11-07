@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 import { getSessionToken, setSessionToken } from './session';
 import { callSecureAuth } from './secureAuth';
 import { clearCachedCrisisContacts } from './crisisContacts';
+import { unregisterPushNotifications } from './pushNotifications';
 import type { Profile, Role } from './types';
 
 interface AuthState {
@@ -153,6 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
+    await unregisterPushNotifications();
     const token = getSessionToken();
     clearSession();
     clearCachedCrisisContacts();

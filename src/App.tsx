@@ -7,6 +7,7 @@ import TherapistDashboard from './TherapistDashboard';
 import WelcomeScreen from './WelcomeScreen';
 import TermsGate, { CURRENT_TERMS_VERSION } from './TermsGate';
 import OfflineScreen from './OfflineScreen';
+import { initPushNotifications } from './lib/pushNotifications';
 
 type Phase = 'entry' | 'auth' | 'app';
 
@@ -20,6 +21,10 @@ export default function App() {
   useEffect(() => {
     if (profile) setPhase('app');
   }, [profile]);
+
+  useEffect(() => {
+    if (profile?.id) void initPushNotifications();
+  }, [profile?.id]);
 
   if (loading) {
     return (

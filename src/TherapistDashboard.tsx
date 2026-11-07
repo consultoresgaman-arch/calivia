@@ -3,6 +3,7 @@ import { BarChart3, LogOut, Calendar, FileText, Users, UserPlus, UserMinus, Aler
 import { supabase } from './lib/supabase';
 import { getSessionToken } from './lib/session';
 import { callSecureAuth } from './lib/secureAuth';
+import { notifyTaskAssigned } from './lib/pushNotifications';
 import { useAuth } from './lib/auth';
 import { getAvatarSignedUrl } from './lib/avatar';
 import ProfileSettingsModal from './ProfileSettingsModal';
@@ -283,8 +284,11 @@ export default function TherapistDashboard() {
     setAssigningTask(true);
     setTaskAssignedMsg(null);
     try {
-      const { error } = await supabase.rpc('assign_patient_task', { p_patient_id: selectedPatientId, p_title: title });
+      const { data: assigned, error } = await supabase
+        .rpc('assign_patient_task', { p_patient_id: selectedPatientId, p_title: title })
+        .single<{ id: string }>();
       if (error) throw error;
+      void notifyTaskAssigned(assigned.id);
       setNewTaskTitle('');
       setTaskAssignedMsg('Consigna enviada.');
       await loadAssignedTasks(selectedPatientId);
