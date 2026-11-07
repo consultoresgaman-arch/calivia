@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import { resolveSession, checkRateLimit, unauthorizedResponse, rateLimitedResponse } from '../_shared/security.ts';
 import { detectRiskKeyword, buildCrisisResponse, maybeCreateRiskAlert, normalizeCrisisLang } from '../_shared/crisis.ts';
+import { sendPushToUser } from '../_shared/push.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -56,6 +57,8 @@ Deno.serve(async (req: Request) => {
       .update({ patient_response: response, patient_response_at: respondedAt })
       .eq('id', taskId);
     if (updateErr) throw updateErr;
+
+    await sendPushToUser(supabase, task.assigned_by as string, 'task-response');
 
     if (detectRiskKeyword(response)) {
       const alertTask = maybeCreateRiskAlert(supabase, session.userId, response);
