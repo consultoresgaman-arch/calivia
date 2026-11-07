@@ -3,6 +3,7 @@ import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, C
 import { supabase } from './lib/supabase';
 import { useAuth } from './lib/auth';
 import { getAvatarSignedUrl } from './lib/avatar';
+import { refreshCrisisContacts } from './lib/crisisContacts';
 import { useHeartbeatSound } from './lib/useHeartbeatSound';
 import AiChat from './AiChat';
 import FreemiumBanner from './FreemiumBanner';
@@ -126,7 +127,11 @@ export default function PatientDashboard({ onExitToHome }: Props) {
     setLinkedProfessional(prof?.full_name ?? t('defaultProfessional'));
   }
 
-  useEffect(() => { loadPendingLinks(); loadLinkedProfessional(); }, []);
+  useEffect(() => {
+    loadPendingLinks();
+    loadLinkedProfessional();
+    void refreshCrisisContacts(profile!.id);
+  }, []);
 
   // Se consulta al abrir y al volver a la app: el especialista puede enviar el enlace
   // mientras la persona tiene Calivia en segundo plano.

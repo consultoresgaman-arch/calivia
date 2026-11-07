@@ -131,30 +131,36 @@ const CRISIS_LINE_BY_COUNTRY: Record<string, Record<Lang, string>> = {
   },
 };
 
-const CONTACT_BLOCK_TEXT: Record<Lang, { trustedContact: (name: string, phone: string) => string; countryLine: (line: string) => string; genericFallback: string }> = {
+const CONTACT_BLOCK_TEXT: Record<Lang, { trustedContact: (name: string, phone: string) => string; specialist: (name: string, phone: string) => string; countryLine: (line: string) => string; genericFallback: string }> = {
   es: {
     trustedContact: (name, phone) => `📞 Llama ahora a ${name}: ${phone} — la persona de confianza que ya guardaste en Calivia.`,
+    specialist: (name, phone) => `📞 Tu especialista, ${name}: ${phone}`,
     countryLine: (line) => `📞 Línea de ayuda de tu país: ${line}`,
     genericFallback: '📞 Si estás en peligro inmediato, contacta ya a los servicios de emergencia de tu país (por ejemplo, el 911 o su equivalente local).',
   },
   en: {
     trustedContact: (name, phone) => `📞 Call ${name} right now: ${phone} — the trusted contact you already saved in Calivia.`,
+    specialist: (name, phone) => `📞 Your specialist, ${name}: ${phone}`,
     countryLine: (line) => `📞 Your country's helpline: ${line}`,
     genericFallback: "📞 If you're in immediate danger, contact your country's emergency services right now (for example, 911 or your local equivalent).",
   },
   pt: {
     trustedContact: (name, phone) => `📞 Ligue agora para ${name}: ${phone} — o contato de confiança que você já salvou no Calivia.`,
+    specialist: (name, phone) => `📞 Seu especialista, ${name}: ${phone}`,
     countryLine: (line) => `📞 Linha de ajuda do seu país: ${line}`,
     genericFallback: '📞 Se você está em perigo imediato, contate agora os serviços de emergência do seu país (por exemplo, o 190/192 ou o equivalente local).',
   },
 };
 
 // Bloque de contacto: SIEMPRE preciso y determinista (nunca rotado ni
-// "creativo"), con esta prioridad: (1) el contacto de confianza que la
-// persona ya guardó en la app, (2) la línea de crisis de su país, (3) una
-// guía genérica de emergencias si no se sabe ninguna de las dos.
+// "creativo"). Muestra el contacto de confianza y el especialista vinculado, si
+// existen, y SIEMPRE una vía de emergencia: la línea del país o, si no se conoce,
+// la guía genérica. Ninguna persona está disponible a toda hora, así que un
+// contacto personal nunca reemplaza a la línea de emergencia.
 async function buildCrisisContactBlock(supabase: ReturnType<typeof createClient>, userId: string, lang: Lang): Promise<string> {
   const copy = CONTACT_BLOCK_TEXT[lang];
+  const lines: string[] = [];
+
   try {
     const { data: contact } = await supabase
       .from('trusted_contacts')
@@ -163,24 +169,43 @@ async function buildCrisisContactBlock(supabase: ReturnType<typeof createClient>
       .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle();
-    if (contact?.phone) {
-      return copy.trustedContact(contact.name, contact.phone);
-    }
+    if (contact?.phone) lines.push(copy.trustedContact(contact.name as string, contact.phone as string));
   } catch (err) {
     console.error('buildCrisisContactBlock: no se pudo obtener el contacto de confianza:', err);
   }
 
   try {
+    const { data: link } = await supabase
+      .from('patient_links')
+      .select('psychologist_id')
+      .eq('patient_id', userId)
+      .eq('status', 'accepted')
+      .maybeSingle();
+    if (link) {
+      const { data: specialist } = await supabase
+        .from('profiles')
+        .select('full_name, phone')
+        .eq('id', link.psychologist_id as string)
+        .maybeSingle();
+      if (specialist?.phone) lines.push(copy.specialist(specialist.full_name as string, specialist.phone as string));
+    }
+  } catch (err) {
+    console.error('buildCrisisContactBlock: no se pudo obtener el especialista vinculado:', err);
+  }
+
+  let emergencyLine = copy.genericFallback;
+  try {
     const { data: profile } = await supabase.from('profiles').select('country').eq('id', userId).maybeSingle();
     const country = profile?.country as string | undefined;
     if (country && CRISIS_LINE_BY_COUNTRY[country]) {
-      return copy.countryLine(CRISIS_LINE_BY_COUNTRY[country][lang]);
+      emergencyLine = copy.countryLine(CRISIS_LINE_BY_COUNTRY[country][lang]);
     }
   } catch (err) {
     console.error('buildCrisisContactBlock: no se pudo obtener el país del usuario:', err);
   }
+  lines.push(emergencyLine);
 
-  return copy.genericFallback;
+  return lines.join('\n');
 }
 
 // Variantes rotadas a mano (nunca generadas por el modelo) para que el

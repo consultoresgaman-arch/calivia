@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { supabase } from './supabase';
 import { getSessionToken, setSessionToken } from './session';
 import { callSecureAuth } from './secureAuth';
+import { clearCachedCrisisContacts } from './crisisContacts';
 import type { Profile, Role } from './types';
 
 interface AuthState {
@@ -105,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signOut() {
     const token = getSessionToken();
     setSessionToken(null);
+    clearCachedCrisisContacts();
     setState({ profile: null, loading: false });
     if (token) await supabase.rpc('logout_session', { p_token: token });
   }
