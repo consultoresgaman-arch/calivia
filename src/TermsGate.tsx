@@ -7,19 +7,71 @@ import strings, { NON_SPANISH_NOTE } from './TermsGate.i18n';
 
 // Sube este valor si el texto legal cambia de forma material — todo perfil
 // con terms_version distinto (o null) vuelve a ver esta pantalla.
-export const CURRENT_TERMS_VERSION = 'v1';
+export const CURRENT_TERMS_VERSION = 'v2';
 
-const POLICY_TEXT = `POLÍTICA DE PRIVACIDAD Y TÉRMINOS DE ACOMPAÑAMIENTO – CALIVIA
+const POLICY_TEXT = `POLÍTICA DE PRIVACIDAD Y TÉRMINOS DE USO – CALIVIA
+Última actualización: 6 de noviembre de 2026
 
-1. Naturaleza del Servicio: Calivia es una herramienta digital de acompañamiento, reflexión y desarrollo personal impulsada por inteligencia artificial. Calivia NO es un servicio de psicoterapia clínica, psiquiatría, ni un centro de atención de urgencias médicas o psicológicas. El uso de la aplicación no reemplaza ni sustituye el diagnóstico, tratamiento o seguimiento de un profesional de la salud mental en un entorno clínico.
+1. Quiénes somos
+Calivia es una aplicación de acompañamiento emocional operada por Rubén Salguero, en Chile. Contacto: consultoresgaman@gmail.com.
 
-2. Privacidad y Confidencialidad Absoluta de las Conversaciones: La privacidad de tus espacios internos es sagrada. Ninguna persona física —incluyendo al equipo desarrollador, administradores y al psicólogo responsable de la plataforma— tiene acceso al contenido de las conversaciones, chats o reflexiones íntimas que mantienes con Calivia. Los datos de tus mensajes se almacenan de forma cifrada y segura exclusivamente para que la inteligencia artificial pueda mantener la memoria de tu proceso de crecimiento personal.
+2. Qué es y qué no es Calivia
+Calivia es una herramienta digital de acompañamiento, reflexión y desarrollo personal con inteligencia artificial. No es psicoterapia, psiquiatría ni un servicio de urgencias, y no reemplaza el diagnóstico, tratamiento o seguimiento de un profesional de la salud. Consulta siempre a un profesional para recibir consejo médico o psicológico. Si tu vida corre peligro, contacta de inmediato a los servicios de emergencia de tu país.
 
-3. Vínculo Profesional y Alertas de Crisis: Si decides voluntariamente vincular/enrolar tu cuenta con un profesional de la salud mental dentro de la plataforma:
-- El profesional NUNCA tendrá acceso a la transcripción, detalles ni contenido de tus conversaciones privadas.
-- El sistema únicamente emitirá y enviará al profesional vinculado una alerta automatizada de riesgo o crisis en caso de que detecte patrones que requieran atención urgente, con el único fin de salvaguardar tu seguridad e integridad física.
+3. Edad mínima
+Calivia es solo para personas de 18 años o más.
 
-4. Aceptación del Usuario: Al registrarte y utilizar Calivia, confirmas que has leído y comprendido la naturaleza de esta aplicación, aceptando sus términos de uso y el tratamiento seguro de tus datos bajo los estándares descritos en esta política.`;
+4. Datos que recogemos
+- Cuenta: nombre, contraseña (guardada como hash, nunca en texto legible), país, y de forma opcional foto, nombre preferido, ocupación y correo de recuperación. Si eres especialista: teléfono, matrícula y biografía.
+- Salud y bienestar: registros de ánimo, mensajes del chat, entradas del diario, tareas y tus respuestas a ellas, y alertas de posible riesgo.
+- Contactos de confianza: nombre y teléfono de las personas que tú agregues. Agrégalas solo si cuentas con su permiso.
+- Voz: si usas el chat por voz, el servicio de reconocimiento de voz de tu dispositivo convierte el audio en texto. Calivia recibe el texto, no el audio.
+- Datos técnicos: identificador del dispositivo para notificaciones y datos de sesión.
+
+Parte de esta información también se guarda en tu dispositivo, como tu sesión, tu perfil y tus contactos de crisis, para que la ayuda funcione sin conexión. Se borra al cerrar sesión o desinstalar la app.
+
+5. Para qué usamos tus datos
+Para darte el servicio: responder en el chat, recordar el contexto de tus conversaciones, generar reflexiones, enviar recordatorios y notificaciones, y activar el protocolo de crisis. No vendemos tus datos ni los usamos para publicidad.
+
+6. Con quién se comparten
+Usamos estos proveedores para operar Calivia:
+- Supabase: alojamiento de la base de datos y los archivos.
+- OpenAI: procesa tus mensajes, entradas del diario y registros para generar respuestas, reflexiones y resúmenes.
+- Google Firebase: entrega notificaciones. Los avisos no incluyen tu nombre ni tu contenido.
+- Resend: envío de correos de recuperación y avisos.
+- Vercel: alojamiento de la versión web.
+- Google Fonts: tipografías de la app.
+- Calendly y Google Meet: si agendas una sesión o te unes a una videollamada, se aplican las condiciones de esos servicios. La llamada ocurre fuera de Calivia.
+
+Estos proveedores pueden tratar los datos fuera de tu país.
+
+7. Si te vinculas con un profesional
+El vínculo es voluntario: lo aceptas con un código y puedes retirarlo cuando quieras desde tu perfil. Mientras exista, tu profesional puede ver:
+- Tus datos de perfil: nombre, nombre preferido, foto, país y ocupación.
+- Tus registros de ánimo.
+- Las fechas en que usaste el chat.
+- Resúmenes generados por IA a partir de tus registros y conversaciones.
+- Tus respuestas a las tareas que te asignó.
+- Las alertas de posible riesgo.
+
+Si detectamos una posible señal de riesgo en el chat, el diario o una respuesta a una tarea, tu profesional recibe una alerta en su panel con un fragmento de hasta 200 caracteres de lo que escribiste, junto con una sugerencia generada por IA. También recibe un aviso por notificación y correo, sin tu nombre ni tu mensaje. Tu profesional no puede leer tus conversaciones completas ni tu diario.
+
+La detección de riesgo es automática, puede fallar y no reemplaza una evaluación profesional.
+
+8. Quién más puede acceder
+Tus datos se protegen con control de acceso y cifrado en tránsito. No usamos cifrado de extremo a extremo: las personas que administran el sistema tienen acceso técnico y solo lo usan cuando es necesario para operar, dar soporte o cumplir la ley. Si reportas una respuesta de la IA, guardamos su texto para revisarlo.
+
+9. Cuánto tiempo guardamos tus datos
+Mientras tu cuenta exista. Si la eliminas, borramos tu perfil y tus datos asociados de forma definitiva, incluidas las notas que un profesional haya escrito sobre ti en Calivia.
+
+10. Tus derechos y eliminación de cuenta
+Puedes acceder a tus datos, corregirlos y pedir su eliminación. Para eliminar tu cuenta, entra en Editar perfil y elige Eliminar mi cuenta, o escribe a consultoresgaman@gmail.com. Más información: https://calivia.vercel.app/eliminar-cuenta.html
+
+11. Uso aceptable
+Puedes reportar dentro de la app cualquier respuesta de la IA que te parezca ofensiva, dañina o incorrecta. Las respuestas de la IA pueden contener errores.
+
+12. Cambios
+Si esta política cambia de forma importante, te pediremos aceptarla de nuevo en la app.`;
 
 export default function TermsGate() {
   const { profile, refreshProfile } = useAuth();

@@ -10,7 +10,6 @@ const strings: Strings = {
     heartbeatDesc: 'Un pulso calmo, como un corazón en reposo',
     windTitle: 'Viento blanco',
     windDesc: 'Un soplo continuo que cubre el ruido mental',
-    lockedDesc: 'Disponible con Calivia Ilimitada',
   },
   en: {
     title: 'Sound gallery',
@@ -21,7 +20,6 @@ const strings: Strings = {
     heartbeatDesc: 'A calm pulse, like a resting heart',
     windTitle: 'White wind',
     windDesc: 'A continuous breeze that covers mental noise',
-    lockedDesc: 'Available with Calivia Unlimited',
   },
   pt: {
     title: 'Galeria de sons',
@@ -32,7 +30,6 @@ const strings: Strings = {
     heartbeatDesc: 'Um pulso calmo, como um coração em repouso',
     windTitle: 'Vento branco',
     windDesc: 'Um sopro contínuo que cobre o ruído mental',
-    lockedDesc: 'Disponível com o Calivia Ilimitado',
   },
 };
 

@@ -363,54 +363,27 @@ async function generateTreatmentSuggestion(message: string, apiKey: string | und
   }
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-// Best-effort: si falla, nunca debe tumbar la alerta en sí (que ya quedó
-// guardada en risk_alerts antes de llegar acá) — el correo es un aviso
-// adicional, no la fuente de verdad.
-async function sendRiskAlertEmail(params: { toEmail: string; patientName: string; reason: string; excerpt: string; suggestion: string }) {
+// Best-effort: si falla, nunca debe tumbar la alerta en sí (que ya quedó guardada
+// en risk_alerts). El correo no lleva nombre ni mensaje: el correo no es un canal
+// protegido para datos de salud, y el detalle se ve en el panel autenticado.
+async function sendRiskAlertEmail(toEmail: string) {
   const apiKey = Deno.env.get('RESEND_API_KEY');
   if (!apiKey) {
     console.error('sendRiskAlertEmail: RESEND_API_KEY no configurado, no se pudo avisar por correo.');
     return;
   }
   const fromEmail = Deno.env.get('RESEND_FROM_EMAIL') ?? 'Calivia <onboarding@resend.dev>';
-  const html = `<!DOCTYPE html>
-<html lang="es">
-<body style="margin:0;padding:0;background:#F5F3EE;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
-    <tr><td align="center">
-      <table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:16px;overflow:hidden;">
-        <tr><td style="padding:32px 32px 8px;">
-          <div style="width:40px;height:40px;border-radius:12px;background:#B85C4A;color:#fff;text-align:center;line-height:40px;font-size:18px;">⚠</div>
-          <h1 style="margin:16px 0 0;font-size:20px;color:#1a1d1a;">Alerta de riesgo — ${escapeHtml(params.patientName)}</h1>
-        </td></tr>
-        <tr><td style="padding:8px 32px 24px;">
-          <p style="font-size:13px;color:#8c8a7e;margin:0 0 4px;">MOTIVO</p>
-          <p style="font-size:14px;line-height:1.6;color:#3a3a36;margin:0 0 16px;">${escapeHtml(params.reason)}</p>
-          <p style="font-size:13px;color:#8c8a7e;margin:0 0 4px;">FRAGMENTO DEL MENSAJE</p>
-          <div style="margin:0 0 16px;padding:12px;background:#F5F3EE;border-radius:10px;font-size:13px;color:#3a3a36;font-style:italic;">"${escapeHtml(params.excerpt)}"</div>
-          <p style="font-size:13px;color:#8c8a7e;margin:0 0 4px;">SUGERENCIA</p>
-          <p style="font-size:14px;line-height:1.6;color:#3a3a36;margin:0 0 20px;">${escapeHtml(params.suggestion)}</p>
-          <p style="font-size:12px;color:#8c8a7e;">Abre Calivia para ver el detalle y marcar la alerta como revisada.</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`;
+  const text = 'Un paciente vinculado requiere tu atención. Abre Calivia para ver el detalle y marcar la alerta como revisada.';
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         from: fromEmail,
-        to: params.toEmail,
-        subject: `Alerta de riesgo — ${params.patientName}`,
-        html,
-        text: `Alerta de riesgo para ${params.patientName}.\n\nMotivo: ${params.reason}\n\nFragmento: "${params.excerpt}"\n\nSugerencia: ${params.suggestion}\n\nAbre Calivia para ver el detalle.`,
+        to: toEmail,
+        subject: 'Calivia: tienes una alerta pendiente',
+        html: `<!DOCTYPE html><html lang="es"><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#3a3a36;padding:24px;"><h1 style="font-size:20px;">Alerta pendiente</h1><p style="font-size:14px;line-height:1.6;">${text}</p></body></html>`,
+        text,
       }),
     });
     if (!res.ok) console.error('sendRiskAlertEmail: Resend error', res.status, await res.text().catch(() => ''));
@@ -451,19 +424,14 @@ export async function maybeCreateRiskAlert(supabase: ReturnType<typeof createCli
 
     await sendPushToUser(supabase, link.psychologist_id as string, 'crisis');
 
-    const [{ data: patientProfile }, { data: psychProfile }] = await Promise.all([
-      supabase.from('profiles').select('full_name, preferred_name').eq('id', userId).maybeSingle(),
-      supabase.from('profiles').select('recovery_email').eq('id', link.psychologist_id).maybeSingle(),
-    ]);
+    const { data: psychProfile } = await supabase
+      .from('profiles')
+      .select('recovery_email')
+      .eq('id', link.psychologist_id as string)
+      .maybeSingle();
 
     if (psychProfile?.recovery_email) {
-      await sendRiskAlertEmail({
-        toEmail: psychProfile.recovery_email as string,
-        patientName: (patientProfile?.preferred_name as string) || (patientProfile?.full_name as string) || 'un paciente',
-        reason,
-        excerpt,
-        suggestion,
-      });
+      await sendRiskAlertEmail(psychProfile.recovery_email as string);
     }
   } catch (err) {
     console.error('maybeCreateRiskAlert failed:', err);

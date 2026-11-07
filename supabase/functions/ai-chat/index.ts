@@ -2,6 +2,9 @@ import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import { resolveSession, checkRateLimit, unauthorizedResponse, rateLimitedResponse } from '../_shared/security.ts';
 import { detectRiskKeyword, buildCrisisResponse, maybeCreateRiskAlert } from '../_shared/crisis.ts';
 
+// Debe coincidir con MAX_DAILY_MESSAGES en src/PatientDashboard.tsx.
+const DAILY_MESSAGE_LIMIT = 50;
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
@@ -839,17 +842,9 @@ Deno.serve(async (req: Request) => {
 
     const { data: profileRow } = await supabase
       .from('profiles')
-      .select('preferred_name, occupation, name_prompt_sent_at, is_premium, premium_until, persona_name_espejo, persona_name_amigo, persona_name_acompanante')
+      .select('preferred_name, occupation, name_prompt_sent_at, persona_name_espejo, persona_name_amigo, persona_name_acompanante')
       .eq('id', userId)
       .maybeSingle();
-
-    // "Premium efectivo": igual que en resolve_session/login_profile/register_profile
-    // (ver 20260828000000_fix_session_rpcs_dropped_avatar_and_specialist_fields.sql),
-    // un accesos de cortesía con `premium_until` vencido NO cuenta como premium acá
-    // tampoco — si no, alguien con una prueba gratuita ya vencida seguiría teniendo
-    // chat por voz y modos avanzados desbloqueados.
-    const isPremium = !!profileRow?.is_premium
-      && (!profileRow?.premium_until || new Date(profileRow.premium_until as string) > new Date());
 
     // Saludo obligatorio de bienvenida: solo dispara si de verdad es un chat
     // vacío (sin chat_logs) Y la persona todavía no tiene preferred_name —
@@ -925,25 +920,22 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ reply: retry }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Paywall de monetización: el chat por voz y los modos de personalidad
-    // "Espejo"/"Acompañante" son exclusivos de Calivia Ilimitada. El frontend
-    // ya bloquea ambos para cuentas free (botón con candado + aviso, nunca
-    // deja que se llegue a pedir esto), así que llegar hasta acá con una de
-    // las dos cosas siendo cuenta free solo pasa si alguien se saltó la UI
-    // (llamada directa a la función) — se rechaza sin tocar OpenAI. El
-    // protocolo de crisis y el perfilado de arriba corren SIEMPRE primero,
-    // sin importar el plan: la seguridad y el perfilado nunca dependen de
-    // haber pagado.
-    if (isVoice && !isPremium) {
+    // Tope diario, después del protocolo de crisis y del perfilado: una persona en
+    // riesgo siempre recibe respuesta. Controla el costo de OpenAI por cuenta. El
+    // mensaje actual ya está guardado, por eso se compara con mayor estricto.
+    const dayStart = new Date();
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const { count: messagesToday, error: countErr } = await supabase
+      .from('chat_logs')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('role', 'user')
+      .gte('created_at', dayStart.toISOString());
+    if (countErr) throw countErr;
+    if ((messagesToday ?? 0) > DAILY_MESSAGE_LIMIT) {
       return new Response(
-        JSON.stringify({ error: 'El chat por voz es exclusivo de Calivia Ilimitada.', premiumRequired: true, feature: 'voice' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    if (mode && mode !== 'amigo' && !isPremium) {
-      return new Response(
-        JSON.stringify({ error: 'Este modo de personalidad es exclusivo de Calivia Ilimitada.', premiumRequired: true, feature: 'mode', mode }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Límite diario alcanzado', dailyLimit: true }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -972,29 +964,24 @@ Deno.serve(async (req: Request) => {
       ? buildPersonalizationContext(profileRow.preferred_name, profileRow.occupation ?? null, lang)
       : '';
 
-    // Memoria entre sesiones (patrones de varios días — "llevas días sintiéndote
-    // así..."): función PREMIUM. Los usuarios Free conservan su chat normal y el
-    // contexto reciente de la conversación (`convo`, arriba), pero Calivia no
-    // consulta el histórico de reportes diarios para hacer seguimiento entre
-    // días — ese acompañamiento de largo plazo es exclusivo de Calivia Ilimitada.
+    // Memoria entre sesiones: patrones de varios días, para que Calivia pueda hacer
+    // seguimiento ("llevas días sintiéndote así...") sin depender solo del chat reciente.
     let memoryContext = '';
-    if (isPremium) {
-      const { data: pastReports } = await supabase
-        .from('ai_reports')
-        .select('report_date, mood_summary, keywords')
-        .eq('user_id', userId)
-        .order('report_date', { ascending: false })
-        .limit(5);
-      if (pastReports && pastReports.length > 0) {
-        const lines = pastReports.map((r) =>
-          `- ${r.report_date}: ${r.mood_summary}${r.keywords?.length ? ` (patrones: ${r.keywords.join(', ')})` : ''}`
-        );
-        memoryContext = [
-          '',
-          'MEMORIA DE SESIONES ANTERIORES (contexto interno para continuidad; NUNCA la recites ni digas frases como "según tus reportes" — solo úsala para comprender mejor a la persona de forma natural):',
-          ...lines,
-        ].join('\n');
-      }
+    const { data: pastReports } = await supabase
+      .from('ai_reports')
+      .select('report_date, mood_summary, keywords')
+      .eq('user_id', userId)
+      .order('report_date', { ascending: false })
+      .limit(5);
+    if (pastReports && pastReports.length > 0) {
+      const lines = pastReports.map((r) =>
+        `- ${r.report_date}: ${r.mood_summary}${r.keywords?.length ? ` (patrones: ${r.keywords.join(', ')})` : ''}`
+      );
+      memoryContext = [
+        '',
+        'MEMORIA DE SESIONES ANTERIORES (contexto interno para continuidad; NUNCA la recites ni digas frases como "según tus reportes" — solo úsala para comprender mejor a la persona de forma natural):',
+        ...lines,
+      ].join('\n');
     }
 
     if (!apiKey) {
@@ -1006,7 +993,7 @@ Deno.serve(async (req: Request) => {
     // Modo de personalidad activo (ver MODE_SYSTEM_PROMPTS arriba): reemplaza
     // por completo el prompt de personalidad/tono por defecto de Calivia,
     // pero la personalización (nombre/ocupación) y la memoria de sesiones
-    // premium se siguen aplicando encima, igual que en el modo por defecto —
+    // se siguen aplicando encima, igual que en el modo por defecto —
     // esas son datos de la PERSONA (el usuario), no de la conversación, así
     // que las cuatro personalidades los conocen por igual.
     const personaName = mode ? (profileRow?.[`persona_name_${mode}`] as string | null | undefined) : null;

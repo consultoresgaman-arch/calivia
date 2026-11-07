@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { MessageCircle, Wind, Gamepad2, LogOut, TrendingUp, CheckSquare, Home, CalendarClock, CloudRain, NotebookPen, UserCog, HeartPulse, Video } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useAuth } from './lib/auth';
@@ -6,7 +8,6 @@ import { getAvatarSignedUrl } from './lib/avatar';
 import { refreshCrisisContacts } from './lib/crisisContacts';
 import { useHeartbeatSound } from './lib/useHeartbeatSound';
 import AiChat from './AiChat';
-import FreemiumBanner from './FreemiumBanner';
 import SosModal from './SosModal';
 import DisconnectionZone from './DisconnectionZone';
 import ScheduleModal from './ScheduleModal';
@@ -23,7 +24,8 @@ import { useT } from './lib/i18n';
 import { initVoiceShortcut, voiceShortcutReady, wasLaunchedFromVoiceShortcut, onVoiceShortcutReopen } from './lib/voiceShortcut';
 import strings from './PatientDashboard.i18n';
 
-const MAX_FREE_MESSAGES = 20;
+// Debe coincidir con DAILY_MESSAGE_LIMIT en supabase/functions/ai-chat/index.ts.
+const MAX_DAILY_MESSAGES = 50;
 const VIDEO_LINK_VISIBLE_HOURS = 6;
 
 type Section = 'chat' | 'breathe' | 'games' | 'progress' | 'tasks' | 'sounds' | 'journal';
@@ -62,9 +64,6 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const [revokingLink, setRevokingLink] = useState(false);
   const [revokeError, setRevokeError] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const today = new Date().toISOString().slice(0, 10);
-  const isPremium = !!profile?.is_premium;
-  const maxFree = isPremium ? Infinity : MAX_FREE_MESSAGES;
   const calmSpace = useHeartbeatSound();
 
   useEffect(() => {
@@ -92,17 +91,34 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const { data } = await supabase
+      const dayStart = new Date();
+      dayStart.setHours(0, 0, 0, 0);
+      const { count } = await supabase
         .from('chat_logs')
-        .select('created_at')
+        .select('id', { count: 'exact', head: true })
         .eq('user_id', profile!.id)
-        .eq('role', 'user');
-      if (!mounted || !data) return;
-      const todayCount = data.filter((c) => c.created_at.slice(0, 10) === today).length;
-      setMessagesSent(todayCount);
+        .eq('role', 'user')
+        .gte('created_at', dayStart.toISOString());
+      if (mounted) setMessagesSent(count ?? 0);
     })();
     return () => { mounted = false; };
-  }, [profile, today]);
+  }, [profile?.id]);
+
+  // Los modales son estado de React, no historial: sin esto, Atrás cerraría la app
+  // en medio del SOS.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const listener = CapacitorApp.addListener('backButton', () => {
+      if (sosOpen) { setSosOpen(false); setSosInitialGrounding(false); }
+      else if (disconnectOpen) setDisconnectOpen(false);
+      else if (scheduleOpen) setScheduleOpen(false);
+      else if (profileModalOpen) setProfileModalOpen(false);
+      else if (menuOpen) setMenuOpen(false);
+      else if (section !== 'chat') setSection('chat');
+      else void CapacitorApp.minimizeApp();
+    });
+    return () => { void listener.then((handle) => handle.remove()); };
+  }, [sosOpen, disconnectOpen, scheduleOpen, profileModalOpen, menuOpen, section]);
 
   async function loadPendingLinks() {
     const { data: links } = await supabase.from('patient_links').select('psychologist_id').eq('status', 'pending');
@@ -337,15 +353,6 @@ export default function PatientDashboard({ onExitToHome }: Props) {
 
         {section === 'chat' && <DailySpark />}
 
-        {section === 'chat' && !isPremium && (
-          <FreemiumBanner
-            messagesToday={messagesSent}
-            maxFree={MAX_FREE_MESSAGES}
-            userId={profile!.id}
-            name={profile?.full_name}
-          />
-        )}
-
         <div className="section-tabs">
           <button className={`stab ${section === 'chat' ? 'active' : ''}`} onClick={() => setSection('chat')} type="button">
             <MessageCircle size={16} strokeWidth={2} /><span>{t('tabChat')}</span>
@@ -374,9 +381,8 @@ export default function PatientDashboard({ onExitToHome }: Props) {
           <div className="chat-section anim-fade">
             <AiChat
               userId={profile!.id}
-              name={profile?.full_name}
               messagesSent={messagesSent}
-              maxFree={maxFree}
+              maxDaily={MAX_DAILY_MESSAGES}
               onMessageSent={() => setMessagesSent((n) => n + 1)}
               onOpenSos={() => setSosOpen(true)}
             />
@@ -418,7 +424,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
 
         {section === 'sounds' && (
           <div className="progress-section anim-fade">
-            <SoundGallery isPremium={isPremium} userId={profile!.id} name={profile?.full_name} />
+            <SoundGallery />
           </div>
         )}
 
@@ -454,16 +460,10 @@ export default function PatientDashboard({ onExitToHome }: Props) {
       <DisconnectionZone
         open={disconnectOpen}
         onClose={() => setDisconnectOpen(false)}
-        isPremium={isPremium}
-        userId={profile!.id}
-        name={profile?.full_name}
       />
       <ScheduleModal
         open={scheduleOpen}
         onClose={() => setScheduleOpen(false)}
-        isPremium={isPremium}
-        userId={profile!.id}
-        name={profile?.full_name}
       />
       <ProfileSettingsModal
         open={profileModalOpen}

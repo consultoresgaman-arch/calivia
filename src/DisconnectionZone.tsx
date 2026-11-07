@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react';
-import { X, Volume2, VolumeX, Circle, Leaf, CloudRain, Lock, Sparkles, Mountain, Scale } from 'lucide-react';
-import { openCheckout } from './lib/payments';
+import { X, Volume2, VolumeX, Circle, Leaf, CloudRain, Sparkles, Mountain, Scale } from 'lucide-react';
 import { useLanguage, useT } from './lib/i18n';
 import strings, {
   STORY_BANKS_BY_LANG,
@@ -14,9 +13,6 @@ import strings, {
 interface Props {
   open: boolean;
   onClose: () => void;
-  isPremium: boolean;
-  userId: string;
-  name?: string | null;
 }
 
 type GameId = 'spheres' | 'trace' | 'raindrop' | 'particles' | 'ascent' | 'balance';
@@ -103,7 +99,7 @@ const MELODIES: number[][] = [
 
 const PARTICLE_HUES = [82, 96, 40, 270, 195];
 
-export default function DisconnectionZone({ open, onClose, isPremium, userId, name }: Props) {
+export default function DisconnectionZone({ open, onClose }: Props) {
   const { lang } = useLanguage();
   const t = useT(strings);
   const [game, setGame] = useState<GameId>('spheres');
@@ -473,8 +469,7 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
     setSoundOn(!soundOn);
   }
 
-  function selectGame(g: GameId, locked: boolean) {
-    if (locked) { openCheckout({ userId, name }); return; }
+  function selectGame(g: GameId) {
     setGame(g);
   }
 
@@ -500,13 +495,13 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
 
   if (!open) return null;
 
-  const games: { id: GameId; title: string; icon: typeof Leaf; locked: boolean }[] = [
-    { id: 'spheres', title: t('gameSpheres'), icon: Circle, locked: false },
-    { id: 'raindrop', title: t('gameRaindrop'), icon: CloudRain, locked: false },
-    { id: 'trace', title: t('gameTrace'), icon: Leaf, locked: !isPremium },
-    { id: 'particles', title: t('gameParticles'), icon: Sparkles, locked: !isPremium },
-    { id: 'ascent', title: t('gameAscent'), icon: Mountain, locked: !isPremium },
-    { id: 'balance', title: t('gameBalance'), icon: Scale, locked: !isPremium },
+  const games: { id: GameId; title: string; icon: typeof Leaf }[] = [
+    { id: 'spheres', title: t('gameSpheres'), icon: Circle },
+    { id: 'raindrop', title: t('gameRaindrop'), icon: CloudRain },
+    { id: 'trace', title: t('gameTrace'), icon: Leaf },
+    { id: 'particles', title: t('gameParticles'), icon: Sparkles },
+    { id: 'ascent', title: t('gameAscent'), icon: Mountain },
+    { id: 'balance', title: t('gameBalance'), icon: Scale },
   ];
 
   return (
@@ -522,11 +517,10 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
         {games.map((g) => {
           const Icon = g.icon;
           return (
-            <button key={g.id} className={`dz-game-tab ${game === g.id ? 'active' : ''} ${g.locked ? 'locked' : ''}`}
-              onClick={() => selectGame(g.id, g.locked)} type="button">
-              {g.locked ? <Lock size={13} /> : <Icon size={14} />}
+            <button key={g.id} className={`dz-game-tab ${game === g.id ? 'active' : ''}`}
+              onClick={() => selectGame(g.id)} type="button">
+              <Icon size={14} />
               <span>{g.title}</span>
-              {g.locked && <span className="dz-premium-badge">{t('premium')}</span>}
             </button>
           );
         })}
@@ -716,8 +710,6 @@ export default function DisconnectionZone({ open, onClose, isPremium, userId, na
         .dz-game-selector::-webkit-scrollbar { display: none; }
         .dz-game-tab { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; padding: 8px 14px; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
         .dz-game-tab.active { border-color: var(--primary); color: var(--primary); background: rgba(112,130,56,0.06); }
-        .dz-game-tab.locked { color: var(--text-muted); border-style: dashed; }
-        .dz-premium-badge { padding: 2px 7px; border-radius: 999px; background: rgba(196,154,90,0.16); color: var(--warn); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
 
         .dz-canvas { flex: 1; position: relative; overflow: hidden; touch-action: none; }
         .dz-glow { position: absolute; top: 50%; left: 50%; width: 280px; height: 280px; transform: translate(-50%, -50%); background: radial-gradient(circle, rgba(168,184,126,0.12) 0%, transparent 70%); filter: blur(30px); pointer-events: none; }

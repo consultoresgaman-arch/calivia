@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mic, Send, Heart, Zap, Volume2, Eye, Smile, HeartHandshake, Lock, X } from 'lucide-react';
+import { Mic, Send, Heart, Volume2, Eye, Smile, HeartHandshake, Flag } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { supabase } from './lib/supabase';
 import { useAuth } from './lib/auth';
 import { getSessionToken } from './lib/session';
 import type { ChatLog } from './lib/types';
-import { isCheckoutConfigured, openCheckout } from './lib/payments';
 import { ensureMicPermission } from './lib/micPermission';
 import { listenOnceNative, speakNative, stopNativeListening, stopNativeSpeech } from './lib/nativeSpeech';
 import { useLanguage, useT, localizeBackendError, type LanguageCode } from './lib/i18n';
@@ -149,14 +148,13 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
 
 interface Props {
   userId: string;
-  name?: string | null;
   messagesSent: number;
-  maxFree: number;
+  maxDaily: number;
   onMessageSent: () => void;
   onOpenSos?: () => void;
 }
 
-export default function AiChat({ userId, name, messagesSent, maxFree, onMessageSent, onOpenSos }: Props) {
+export default function AiChat({ userId, messagesSent, maxDaily, onMessageSent, onOpenSos }: Props) {
   const { lang } = useLanguage();
   const t = useT(strings);
   const { profile, refreshProfile } = useAuth();
@@ -167,6 +165,9 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [usingFallback, setUsingFallback] = useState(false);
+  const [reportingId, setReportingId] = useState<string | null>(null);
+  const [reportedIds, setReportedIds] = useState<Set<string>>(new Set());
+  const [reportError, setReportError] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(true);
 
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -205,25 +206,6 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   const modeRef = useRef<ChatMode | null>(mode);
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
-  // Paywall híbrido del selector de personalidades: en el plan gratuito solo
-  // "Amigo" está disponible — Espejo y Acompañante son exclusivos de Calivia
-  // Ilimitada. El hilo por defecto (sin modo, `mode === null`) sigue siendo
-  // libre para todos, como siempre — no es uno de los tres botones.
-  const isPremium = !!profile?.is_premium;
-  const isModeLocked = (id: ChatMode) => id !== 'amigo' && !isPremium;
-  // Aviso que se muestra al tocar un modo bloqueado o el mic sin ser premium.
-  const [premiumNotice, setPremiumNotice] = useState<'voice' | 'espejo' | 'acompanante' | null>(null);
-
-  // Si el modo activo queda bloqueado (perfil recién cargado con un modo
-  // premium guardado de una sesión anterior, o la suscripción venció
-  // mientras la persona seguía con la app abierta), vuelve al hilo por
-  // defecto en vez de dejarla mandando mensajes a un modo que el backend
-  // igual va a rechazar.
-  useEffect(() => {
-    if (mode && isModeLocked(mode)) setMode(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, isPremium]);
-
   const bottomRef = useRef<HTMLDivElement>(null);
   // Evita animar el scroll la primera vez que se pinta un hilo (carga
   // inicial o cambio de modo) — ahí queremos aparecer YA abajo del todo, no
@@ -259,7 +241,9 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   // casi al mismo tiempo nunca disparan dos llamadas a la IA en paralelo.
   const chainActiveRef = useRef(false);
 
-  const limitReached = messagesSent >= maxFree;
+  // El servidor tiene la última palabra sobre el tope diario.
+  const [serverLimitHit, setServerLimitHit] = useState(false);
+  const limitReached = messagesSent >= maxDaily || serverLimitHit;
   useEffect(() => { limitReachedRef.current = limitReached; }, [limitReached]);
 
   useEffect(() => {
@@ -436,7 +420,11 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       });
     }
     function onVisibilityChange() {
-      if (document.visibilityState === 'hidden') flushPendingFragment();
+      if (document.visibilityState === 'hidden') {
+        flushPendingFragment();
+        // Nunca se escucha el micrófono con la app en segundo plano.
+        if (voiceModeRef.current) stopVoiceMode();
+      }
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', flushPendingFragment);
@@ -562,12 +550,6 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
     if (!voiceSupported) return;
     if (voiceModeRef.current) {
       stopVoiceMode();
-      return;
-    }
-    // Chat por voz: exclusivo de Calivia Ilimitada. Se avisa en vez de
-    // arrancar a escuchar — nunca se llega a pedir permiso de micrófono.
-    if (!isPremium) {
-      setPremiumNotice('voice');
       return;
     }
     if (limitReachedRef.current) return;
@@ -855,6 +837,14 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       let reply: string = '';
       let isFallback = false;
 
+      if (res.status === 429) {
+        const limited = await res.clone().json().catch(() => null);
+        if (limited?.dailyLimit) {
+          setServerLimitHit(true);
+          return;
+        }
+      }
+
       if (res.ok) {
         const json = await res.json();
         reply = json.reply ?? json.message ?? '';
@@ -906,6 +896,19 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
   function handleModeClick(id: ChatMode) {
     if (voiceModeRef.current) stopVoiceMode();
     setMode((m) => (m === id ? null : id));
+  }
+
+  async function reportMessage(message: ChatLog, reason: 'offensive' | 'harmful' | 'inaccurate' | 'other') {
+    setReportError(false);
+    const { error: reportErr } = await supabase
+      .from('ai_content_reports')
+      .insert({ user_id: userId, content: message.content.slice(0, 4000), reason });
+    if (reportErr) {
+      setReportError(true);
+      return;
+    }
+    setReportingId(null);
+    setReportedIds((ids) => new Set(ids).add(message.id));
   }
 
   function personaLabel(id: ChatMode, labelKey: 'modeEspejo' | 'modeAmigo' | 'modeAcompanante'): string {
@@ -980,6 +983,27 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
               )}
               <div className={`bubble ${m.role}`}>
                 <div className="bubble-text">{m.content}</div>
+                {m.role === 'assistant' && (
+                  reportedIds.has(m.id) ? (
+                    <p className="report-done">{t('reportThanks')}</p>
+                  ) : reportingId === m.id ? (
+                    <div className="report-panel">
+                      <span>{t('reportTitle')}</span>
+                      <div className="report-reasons">
+                        <button type="button" onClick={() => reportMessage(m, 'offensive')}>{t('reportOffensive')}</button>
+                        <button type="button" onClick={() => reportMessage(m, 'harmful')}>{t('reportHarmful')}</button>
+                        <button type="button" onClick={() => reportMessage(m, 'inaccurate')}>{t('reportInaccurate')}</button>
+                        <button type="button" onClick={() => reportMessage(m, 'other')}>{t('reportOther')}</button>
+                        <button type="button" className="report-cancel" onClick={() => { setReportingId(null); setReportError(false); }}>{t('reportCancel')}</button>
+                      </div>
+                      {reportError && <p className="report-error">{t('reportFailed')}</p>}
+                    </div>
+                  ) : (
+                    <button type="button" className="report-open" aria-label={t('reportMessage')} onClick={() => { setReportingId(m.id); setReportError(false); }}>
+                      <Flag size={11} strokeWidth={2} /><span>{t('reportMessage')}</span>
+                    </button>
+                  )
+                )}
               </div>
             </div>
           ))
@@ -1012,59 +1036,25 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
       {limitReached && !sending && (
         <div className="chat-limit">
           <p>{t('limitReached')}</p>
-          {isCheckoutConfigured() ? (
-            <button
-              className="chat-limit-cta"
-              type="button"
-              onClick={() => openCheckout({ userId, name })}
-            >
-              <Zap size={14} strokeWidth={2.5} /><span>{t('unlockUnlimited')}</span>
-            </button>
-          ) : (
-            <p className="chat-limit-sub">{t('exploreUnlimited')}</p>
-          )}
+          <p className="chat-limit-sub">{t('limitCrisisHint')}</p>
         </div>
       )}
 
       <div className="mode-selector-bar" role="group" aria-label={t('modeSelectorAria')}>
-        {MODE_OPTIONS.map(({ id, Icon, labelKey }) => {
-          const locked = isModeLocked(id);
-          return (
-            <button
-              key={id}
-              type="button"
-              className={`mode-btn ${mode === id ? 'active' : ''} ${locked ? 'locked' : ''}`}
-              onClick={() => (locked ? setPremiumNotice(id as 'espejo' | 'acompanante') : handleModeClick(id))}
-              disabled={limitReached || onboarding}
-              aria-pressed={mode === id}
-              aria-label={locked ? `${personaLabel(id, labelKey)} — ${t('premiumBadge')}` : undefined}
-              title={locked ? t('premiumModeLocked') : undefined}
-            >
-              {locked && <Lock size={10} strokeWidth={2.5} className="mode-btn-lock" />}
-              <Icon size={14} strokeWidth={2} />
-              <span>{personaLabel(id, labelKey)}</span>
-            </button>
-          );
-        })}
+        {MODE_OPTIONS.map(({ id, Icon, labelKey }) => (
+          <button
+            key={id}
+            type="button"
+            className={`mode-btn ${mode === id ? 'active' : ''}`}
+            onClick={() => handleModeClick(id)}
+            disabled={limitReached || onboarding}
+            aria-pressed={mode === id}
+          >
+            <Icon size={14} strokeWidth={2} />
+            <span>{personaLabel(id, labelKey)}</span>
+          </button>
+        ))}
       </div>
-
-      {premiumNotice && (
-        <div className="premium-notice">
-          <p>{premiumNotice === 'voice' ? t('premiumVoiceLocked') : t('premiumModeLocked')}</p>
-          <div className="premium-notice-actions">
-            {isCheckoutConfigured() ? (
-              <button className="chat-limit-cta" type="button" onClick={() => openCheckout({ userId, name })}>
-                <Zap size={14} strokeWidth={2.5} /><span>{t('unlockUnlimited')}</span>
-              </button>
-            ) : (
-              <p className="chat-limit-sub">{t('exploreUnlimited')}</p>
-            )}
-            <button className="premium-notice-close" type="button" onClick={() => setPremiumNotice(null)} aria-label={t('closePremiumNotice')}>
-              <X size={14} strokeWidth={2} />
-            </button>
-          </div>
-        </div>
-      )}
 
       <form className="chat-input" onSubmit={(e) => send(e)}>
         <textarea
@@ -1086,14 +1076,13 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         {VOICE_INPUT_ENABLED && (
           <button
             type="button"
-            className={`mic-btn ${voiceModeActive ? 'voice-active' : ''} ${recording ? 'rec' : ''} ${!voiceSupported ? 'disabled' : ''} ${!isPremium ? 'locked' : ''}`}
+            className={`mic-btn ${voiceModeActive ? 'voice-active' : ''} ${recording ? 'rec' : ''} ${!voiceSupported ? 'disabled' : ''}`}
             onClick={toggleVoiceMode}
             disabled={limitReached || !voiceSupported || onboarding}
             aria-pressed={voiceModeActive}
-            aria-label={!isPremium ? `${t('speakToMic')} — ${t('premiumBadge')}` : voiceModeActive ? t('stopRecording') : t('speakToMic')}
-            title={!isPremium ? t('premiumVoiceLocked') : voiceSupported ? t('micTitleSupported') : t('micTitleUnsupported')}
+            aria-label={voiceModeActive ? t('stopRecording') : t('speakToMic')}
+            title={voiceSupported ? t('micTitleSupported') : t('micTitleUnsupported')}
           >
-            {!isPremium && <Lock size={10} strokeWidth={2.5} className="mic-btn-lock" />}
             <Mic size={18} strokeWidth={2} />
           </button>
         )}
@@ -1203,6 +1192,13 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           border-radius: var(--radius-sm); font-size: 13px;
           border: 1px solid rgba(184,92,74,0.2);
         }
+        .report-open { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 0; border: none; background: transparent; color: var(--text-muted); font-size: 11px; cursor: pointer; }
+        .report-panel { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--text-soft); }
+        .report-reasons { display: flex; flex-wrap: wrap; gap: 6px; }
+        .report-reasons button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 11.5px; cursor: pointer; }
+        .report-reasons .report-cancel { border-color: transparent; background: transparent; color: var(--text-soft); }
+        .report-done { margin: 6px 0 0; font-size: 11.5px; color: var(--text-soft); }
+        .report-error { margin: 0; font-size: 11.5px; color: var(--danger); }
         .chat-limit {
           margin: 8px 2px; padding: 12px 14px;
           background: rgba(196,154,90,0.1); color: var(--warn);
@@ -1211,15 +1207,6 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         }
         .chat-limit p { margin: 0; }
         .chat-limit-sub { color: var(--warn); }
-        .chat-limit-cta {
-          display: inline-flex; align-items: center; gap: 6px;
-          padding: 9px 18px; border: none; border-radius: 999px;
-          background: var(--primary); color: #fff;
-          font-size: 13px; font-weight: 700; cursor: pointer;
-          transition: transform 0.12s, box-shadow 0.15s;
-          box-shadow: 0 2px 10px rgba(112,130,56,0.25);
-        }
-        .chat-limit-cta:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(112,130,56,0.3); }
 
         .mode-selector-bar {
           display: flex; gap: 6px; padding-top: 10px;
@@ -1238,32 +1225,7 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
           box-shadow: 0 2px 8px rgba(112,130,56,0.25);
         }
         .mode-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-        .mode-btn.locked { position: relative; opacity: 0.65; }
-        .mode-btn.locked:hover:not(:disabled) { border-color: var(--border); color: var(--text-soft); background: var(--surface-2); }
-        .mode-btn-lock {
-          position: absolute; top: -5px; right: -5px;
-          width: 16px; height: 16px; border-radius: 50%;
-          background: var(--warn); color: #fff;
-          display: grid; place-items: center;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        }
 
-        .premium-notice {
-          margin: 8px 2px 0; padding: 10px 14px;
-          background: rgba(196,154,90,0.12); color: var(--warn);
-          border-radius: var(--radius-sm); font-size: 13px; text-align: center;
-          display: flex; flex-direction: column; align-items: center; gap: 8px;
-          position: relative; border: 1px dashed rgba(196,154,90,0.4);
-        }
-        .premium-notice p { margin: 0; padding-right: 18px; }
-        .premium-notice-actions { display: flex; align-items: center; gap: 10px; }
-        .premium-notice-close {
-          position: absolute; top: 8px; right: 10px;
-          background: none; border: none; color: var(--warn);
-          cursor: pointer; padding: 2px; display: grid; place-items: center;
-          opacity: 0.7;
-        }
-        .premium-notice-close:hover { opacity: 1; }
 
         .chat-input {
           display: flex; gap: 8px; padding-top: 12px;
@@ -1310,14 +1272,6 @@ export default function AiChat({ userId, name, messagesSent, maxFree, onMessageS
         }
         .mic-btn.disabled { opacity: 0.35; cursor: not-allowed; }
         .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-        .mic-btn.locked { opacity: 0.75; }
-        .mic-btn-lock {
-          position: absolute; top: -3px; right: -3px;
-          width: 16px; height: 16px; border-radius: 50%;
-          background: var(--warn); color: #fff;
-          display: grid; place-items: center;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        }
         .send-btn {
           background: var(--primary);
           color: #fff;
