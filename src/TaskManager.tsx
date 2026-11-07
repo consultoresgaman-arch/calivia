@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckSquare, Square, Trash2, Bell, BellOff, Plus } from 'lucide-react';
+import { Check, CheckSquare, Square, Trash2, Bell, BellOff, Plus } from 'lucide-react';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { supabase } from './lib/supabase';
+import { getSessionToken } from './lib/session';
+import { detectRiskKeyword } from './lib/riskDetection';
+import { CRISIS_FALLBACK_REPLY } from './AiChat.i18n';
 import type { TaskItem } from './lib/types';
 import { useLanguage, useT, type LanguageCode } from './lib/i18n';
 import {
@@ -46,6 +49,11 @@ export default function TaskManager({ userId }: Props) {
   const [nativeNotifGranted, setNativeNotifGranted] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const notifiedRef = useRef<Set<string>>(new Set());
+  const [responseDrafts, setResponseDrafts] = useState<Record<string, string>>({});
+  const [savingResponseId, setSavingResponseId] = useState<string | null>(null);
+  const [responseErrorId, setResponseErrorId] = useState<string | null>(null);
+  const [crisisReplies, setCrisisReplies] = useState<Record<string, string>>({});
+  const [editingResponseId, setEditingResponseId] = useState<string | null>(null);
 
   // Al entrar en un dispositivo nativo, se crea un canal de notificaciones por cada tono
   // disponible (Android 8+ exige un canal para poder sonar/vibrar, y el sonido de un canal
@@ -156,6 +164,99 @@ export default function TaskManager({ userId }: Props) {
     await cancelTaskReminder(id);
   }
 
+  async function saveResponse(task: TaskItem) {
+    const text = (responseDrafts[task.id] ?? task.patient_response ?? '').trim();
+    if (!text || savingResponseId) return;
+    setSavingResponseId(task.id);
+    setResponseErrorId(null);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/task-response`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'x-session-token': getSessionToken() ?? '',
+        },
+        body: JSON.stringify({ taskId: task.id, response: text, lang }),
+      });
+      if (!res.ok) throw new Error(`task-response ${res.status}`);
+      const json = await res.json();
+      setTasks((prev) => prev.map((x) => (x.id === task.id
+        ? { ...x, patient_response: text, patient_response_at: json.respondedAt }
+        : x)));
+      setResponseDrafts((d) => { const next = { ...d }; delete next[task.id]; return next; });
+      setEditingResponseId(null);
+      if (json.crisisReply) setCrisisReplies((c) => ({ ...c, [task.id]: json.crisisReply }));
+    } catch (err) {
+      console.error('[Calivia] saveResponse falló:', err);
+      setResponseErrorId(task.id);
+      if (detectRiskKeyword(text)) setCrisisReplies((c) => ({ ...c, [task.id]: CRISIS_FALLBACK_REPLY[lang] }));
+    } finally {
+      setSavingResponseId(null);
+    }
+  }
+
+  function renderResponse(task: TaskItem) {
+    if (!task.assigned_by) return null;
+    const value = responseDrafts[task.id] ?? task.patient_response ?? '';
+    const changed = value.trim() !== (task.patient_response ?? '').trim();
+
+    // Una respuesta enviada se muestra como texto fijo: un cuadro editable con el
+    // botón apagado parecía que no se había enviado.
+    if (task.patient_response && editingResponseId !== task.id) {
+      return (
+        <div className="tk-response">
+          <p className="tk-response-sent-text">{task.patient_response}</p>
+          {crisisReplies[task.id] && <p className="tk-response-crisis">{crisisReplies[task.id]}</p>}
+          <div className="tk-response-actions">
+            <span className="tk-response-saved"><Check size={13} strokeWidth={2.5} /> {tr('responseSent')}</span>
+            <button type="button" className="tk-response-link" onClick={() => setEditingResponseId(task.id)}>
+              {tr('responseEdit')}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="tk-response">
+        <textarea
+          value={value}
+          maxLength={2000}
+          rows={3}
+          onChange={(e) => setResponseDrafts((d) => ({ ...d, [task.id]: e.target.value }))}
+          placeholder={tr('responsePlaceholder')}
+          aria-label={tr('responsePlaceholder')}
+        />
+        <p className="tk-response-hint">{tr('responseVisibleHint')}</p>
+        {responseErrorId === task.id && <p className="tk-response-error">{tr('responseSaveFailed')}</p>}
+        {crisisReplies[task.id] && <p className="tk-response-crisis">{crisisReplies[task.id]}</p>}
+        <div className="tk-response-actions">
+          {task.patient_response && (
+            <button
+              type="button"
+              className="tk-response-link"
+              onClick={() => {
+                setEditingResponseId(null);
+                setResponseDrafts((d) => { const next = { ...d }; delete next[task.id]; return next; });
+              }}
+            >
+              {tr('responseCancel')}
+            </button>
+          )}
+          <button
+            type="button"
+            className="tk-response-btn"
+            disabled={!value.trim() || !changed || savingResponseId === task.id}
+            onClick={() => saveResponse(task)}
+          >
+            {savingResponseId === task.id ? tr('responseSaving') : tr('responseSend')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <section className="tk-card">
       <div className="tk-head">
@@ -242,6 +343,7 @@ export default function TaskManager({ userId }: Props) {
                     {t.due_at && <span className="tk-due">{formatDue(t.due_at, lang, tr('today'), tr('tomorrow'))}</span>}
                     {t.assigned_by && <span className="tk-assigned-badge">{tr('assignedBySpecialist')}</span>}
                   </div>
+                  {renderResponse(t)}
                 </div>
                 <button className="tk-delete" onClick={() => removeTask(t.id)} type="button" aria-label={tr('delete')}>
                   <Trash2 size={15} strokeWidth={2} />
@@ -259,6 +361,7 @@ export default function TaskManager({ userId }: Props) {
                   </button>
                   <div className="tk-body">
                     <span className="tk-title">{t.title}</span>
+                    {renderResponse(t)}
                   </div>
                   <button className="tk-delete" onClick={() => removeTask(t.id)} type="button" aria-label={tr('delete')}>
                     <Trash2 size={15} strokeWidth={2} />
@@ -297,6 +400,19 @@ export default function TaskManager({ userId }: Props) {
         .tk-item { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
         .tk-item.overdue { border-color: var(--warn); background: rgba(196,154,90,0.08); }
         .tk-item.done { opacity: 0.55; }
+        .tk-item.done:has(.tk-response) { opacity: 1; }
+        .tk-response { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; width: 100%; }
+        .tk-response textarea { width: 100%; font: inherit; font-size: 14px; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); resize: vertical; }
+        .tk-response textarea:focus { border-color: var(--primary); outline: none; }
+        .tk-response-hint { margin: 0; font-size: 11.5px; color: var(--text-soft); }
+        .tk-response-error { margin: 0; font-size: 12.5px; color: var(--danger); }
+        .tk-response-crisis { margin: 0; padding: 10px 12px; font-size: 13.5px; line-height: 1.5; color: var(--text); white-space: pre-wrap; background: rgba(196,154,90,0.12); border-radius: var(--radius-sm); }
+        .tk-response-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+        .tk-response-saved { display: inline-flex; align-items: center; gap: 4px; margin-right: auto; font-size: 12px; font-weight: 600; color: var(--primary-600); }
+        .tk-response-sent-text { margin: 0; padding: 9px 11px; font-size: 14px; line-height: 1.5; color: var(--text); white-space: pre-wrap; word-break: break-word; background: var(--surface-2); border-radius: var(--radius-sm); }
+        .tk-response-link { padding: 4px; border: none; background: transparent; color: var(--text-soft); font-size: 12.5px; font-weight: 600; text-decoration: underline; cursor: pointer; }
+        .tk-response-btn { padding: 7px 14px; border: none; border-radius: 999px; background: var(--primary); color: #fff; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+        .tk-response-btn:disabled { opacity: 0.5; cursor: default; }
         .tk-check { border: none; background: transparent; color: var(--text-soft); cursor: pointer; display: grid; place-items: center; flex-shrink: 0; padding: 2px; }
         .tk-check.checked { color: var(--primary); }
         .tk-check:hover { color: var(--primary); }

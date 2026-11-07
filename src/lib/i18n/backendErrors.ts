@@ -51,6 +51,13 @@ const BACKEND_ERRORS: Record<string, Record<LanguageCode, string>> = {
   },
 };
 
+const NO_CONNECTION: Record<LanguageCode, string> = {
+  es: 'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
+  en: 'No connection. Check your internet and try again.',
+  pt: 'Sem conexão. Verifique sua internet e tente novamente.',
+};
+
 export function localizeBackendError(message: string, lang: LanguageCode): string {
+  if (/failed to fetch|network ?(request|error)|load failed/i.test(message)) return NO_CONNECTION[lang];
   return BACKEND_ERRORS[message]?.[lang] ?? message;
 }

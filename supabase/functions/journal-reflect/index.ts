@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import { resolveSession, checkRateLimit, unauthorizedResponse, rateLimitedResponse } from '../_shared/security.ts';
+import { detectRiskKeyword, buildCrisisResponse, maybeCreateRiskAlert } from '../_shared/crisis.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -118,6 +119,27 @@ Deno.serve(async (req: Request) => {
     if (!session || session.userId !== userId) return unauthorizedResponse(corsHeaders);
     if (!(await checkRateLimit(supabase, `journal-reflect:${userId}`, 20, 60))) {
       return rateLimitedResponse(corsHeaders);
+    }
+
+    // Igual que en el chat: ante una señal de riesgo, la respuesta nunca queda en
+    // manos del modelo ni sugiere una herramienta de relajación.
+    if (detectRiskKeyword(content)) {
+      const alertTask = maybeCreateRiskAlert(supabase, userId, content);
+      const waitUntil = (globalThis as any).EdgeRuntime?.waitUntil;
+      if (typeof waitUntil === 'function') waitUntil(alertTask);
+      else await alertTask;
+
+      const crisisReply = await buildCrisisResponse(supabase, userId, lang);
+      await supabase.from('journal_entries').insert({
+        user_id: userId,
+        content,
+        ai_reflection: crisisReply,
+        suggested_tool: 'none',
+      });
+      return new Response(
+        JSON.stringify({ reflection: crisisReply, suggestedTool: 'none', toolReason: '', crisis: true }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const apiKey = Deno.env.get('OPENAI_API_KEY');

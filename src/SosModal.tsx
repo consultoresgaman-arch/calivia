@@ -5,6 +5,10 @@ import { Haptics } from '@capacitor/haptics';
 import { CRISIS_LINES, localizeCountryLabel, localizeCrisisLine } from './lib/crisis';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
+import {
+  cacheCrisisContacts, readCachedCrisisContacts, refreshCrisisContacts,
+  type LinkedSpecialist, type TrustedContact,
+} from './lib/crisisContacts';
 import { useLanguage, useT } from './lib/i18n';
 import strings from './SosModal.i18n';
 
@@ -21,12 +25,6 @@ const HEARTBEAT_CYCLE = { lub: 90, gapAfterLub: 100, dub: 120, rest: 700 };
 const VIBRATION_LIKELY_SUPPORTED =
   Capacitor.isNativePlatform() || (typeof navigator !== 'undefined' && 'vibrate' in navigator);
 
-interface TrustedContact {
-  id: string;
-  name: string;
-  phone: string;
-}
-
 type BreathPhase = 'inhale' | 'exhale';
 
 const PHASE_DURATION: Record<BreathPhase, number> = { inhale: 4000, exhale: 6000 };
@@ -42,6 +40,7 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
   const timerRef = useRef<number | null>(null);
 
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
+  const [specialist, setSpecialist] = useState<LinkedSpecialist | null>(null);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [showContactForm, setShowContactForm] = useState(false);
@@ -67,15 +66,22 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    setContactsLoading(true);
+    // Primero la copia guardada: sin conexión es lo único disponible, y con
+    // conexión evita que los teléfonos tarden en aparecer en plena crisis.
+    const cached = readCachedCrisisContacts(profile!.id);
+    setContacts(cached.contacts);
+    setSpecialist(cached.specialist);
+    setContactsLoading(cached.contacts.length === 0 && !cached.specialist);
     (async () => {
-      const { data } = await supabase
-        .from('trusted_contacts')
-        .select('id, name, phone')
-        .eq('user_id', profile!.id)
-        .order('created_at', { ascending: true });
-      setContacts(data ?? []);
-      setContactsLoading(false);
+      try {
+        const fresh = await refreshCrisisContacts(profile!.id);
+        if (fresh) {
+          setContacts(fresh.contacts);
+          setSpecialist(fresh.specialist);
+        }
+      } finally {
+        setContactsLoading(false);
+      }
     })();
   }, [open, profile]);
 
@@ -117,13 +123,21 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
         .from('trusted_contacts')
         .insert({ user_id: profile!.id, name: newName.trim(), phone: newPhone.trim() })
         .select('id, name, phone').single();
-      if (data) { setContacts((c) => [...c, data]); setNewName(''); setNewPhone(''); setShowContactForm(false); }
+      if (data) {
+        const next = [...contacts, data];
+        setContacts(next);
+        cacheCrisisContacts(profile!.id, { contacts: next, specialist });
+        setNewName(''); setNewPhone(''); setShowContactForm(false);
+      }
     } finally { setSavingContact(false); }
   }
 
   async function deleteContact(id: string) {
-    await supabase.from('trusted_contacts').delete().eq('id', id);
-    setContacts((c) => c.filter((x) => x.id !== id));
+    const { error } = await supabase.from('trusted_contacts').delete().eq('id', id);
+    if (error) return;
+    const next = contacts.filter((x) => x.id !== id);
+    setContacts(next);
+    cacheCrisisContacts(profile!.id, { contacts: next, specialist });
   }
 
   function ensureAudioCtx(): AudioContext {
@@ -262,6 +276,24 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
             <Vibrate size={15} strokeWidth={2} /><span>{t('groundingEntry')}</span>
           </button>
         </div>
+
+        {specialist && (
+          <>
+            <div className="sos-divider"><span>{t('yourSpecialist')}</span></div>
+            <div className="sos-contacts">
+              <div className="trusted-contact">
+                <a className="trusted-call" href={`tel:${specialist.phone.replace(/\s/g, '')}`}>
+                  <div className="trusted-icon"><Phone size={16} strokeWidth={2} /></div>
+                  <div className="trusted-body">
+                    <span className="trusted-name">{specialist.name}</span>
+                    <span className="trusted-phone">{specialist.phone}</span>
+                  </div>
+                </a>
+              </div>
+              <p className="sos-contacts-empty">{t('specialistAvailabilityNote')}</p>
+            </div>
+          </>
+        )}
 
         <div className="sos-divider"><span>{t('trustedContact')}</span></div>
         <div className="sos-contacts">

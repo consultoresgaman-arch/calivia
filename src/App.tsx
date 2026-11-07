@@ -6,11 +6,12 @@ import PatientDashboard from './PatientDashboard';
 import TherapistDashboard from './TherapistDashboard';
 import WelcomeScreen from './WelcomeScreen';
 import TermsGate, { CURRENT_TERMS_VERSION } from './TermsGate';
+import OfflineScreen from './OfflineScreen';
 
 type Phase = 'entry' | 'auth' | 'app';
 
 export default function App() {
-  const { profile, loading } = useAuth();
+  const { profile, loading, offline, retrySession } = useAuth();
   // Si ya hay un token de sesión guardado, arrancamos directo en 'app' para
   // no mostrar ni la bienvenida ni el login mientras se resuelve la sesión
   // en segundo plano (la pantalla de carga cubre esa espera).
@@ -32,6 +33,8 @@ export default function App() {
       </div>
     );
   }
+
+  if (offline && !profile) return <OfflineScreen onRetry={retrySession} />;
 
   if (phase === 'entry') {
     return <WelcomeScreen onEnter={() => setPhase(profile ? 'app' : 'auth')} />;

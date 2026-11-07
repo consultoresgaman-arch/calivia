@@ -3,6 +3,8 @@ import { NotebookPen, CloudRain, Gamepad2, Vibrate, Send } from 'lucide-react';
 import { useLanguage, useT } from './lib/i18n';
 import { getSessionToken } from './lib/session';
 import strings from './JournalSpace.i18n';
+import { CRISIS_FALLBACK_REPLY } from './AiChat.i18n';
+import { detectRiskKeyword } from './lib/riskDetection';
 
 interface Props {
   userId: string;
@@ -52,7 +54,11 @@ export default function JournalSpace({ userId, onOpenSounds, onOpenGames, onOpen
       const json = await res.json();
       setResult({ reflection: json.reflection, suggestedTool: json.suggestedTool, toolReason: json.toolReason });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('unexpectedError'));
+      if (detectRiskKeyword(text)) {
+        setResult({ reflection: CRISIS_FALLBACK_REPLY[lang], suggestedTool: 'none', toolReason: '' });
+      } else {
+        setError(err instanceof Error ? err.message : t('unexpectedError'));
+      }
     } finally {
       setSending(false);
     }
