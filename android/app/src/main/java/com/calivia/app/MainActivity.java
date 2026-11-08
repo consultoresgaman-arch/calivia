@@ -7,6 +7,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(MicPermissionPlugin.class);
+        registerPlugin(InstallSourcePlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
