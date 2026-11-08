@@ -430,12 +430,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
 
         {section === 'journal' && (
           <div className="progress-section anim-fade">
-            <JournalSpace
-              userId={profile!.id}
-              onOpenSounds={() => setSection('sounds')}
-              onOpenGames={() => setDisconnectOpen(true)}
-              onOpenVibration={() => { setSosInitialGrounding(true); setSosOpen(true); }}
-            />
+            <JournalSpace userId={profile!.id} onOpenSos={() => setSosOpen(true)} />
           </div>
         )}
       </main>

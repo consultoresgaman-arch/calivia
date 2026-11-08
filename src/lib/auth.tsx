@@ -5,6 +5,7 @@ import { callSecureAuth } from './secureAuth';
 import { clearCachedCrisisContacts } from './crisisContacts';
 import { unregisterPushNotifications } from './pushNotifications';
 import { cancelAllTaskReminders } from './taskNotifications';
+import { JOURNAL_DRAFT_PREFIX } from '../JournalSpace';
 import type { Profile, Role } from './types';
 
 interface AuthState {
@@ -160,6 +161,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = getSessionToken();
     clearSession();
     clearCachedCrisisContacts();
+    try {
+      Object.keys(localStorage).filter((key) => key.startsWith(JOURNAL_DRAFT_PREFIX)).forEach((key) => localStorage.removeItem(key));
+    } catch { /* ignore */ }
     if (token) await supabase.rpc('logout_session', { p_token: token });
   }
 

@@ -10,7 +10,7 @@ import strings, { NON_SPANISH_NOTE } from './TermsGate.i18n';
 export const CURRENT_TERMS_VERSION = 'v2';
 
 const POLICY_TEXT = `POLÍTICA DE PRIVACIDAD Y TÉRMINOS DE USO – CALIVIA
-Última actualización: 6 de noviembre de 2026
+Última actualización: 8 de noviembre de 2026
 
 1. Quiénes somos
 Calivia es una aplicación de acompañamiento emocional operada por Rubén Salguero, en Chile. Contacto: consultoresgaman@gmail.com.
@@ -28,15 +28,15 @@ Calivia es solo para personas de 18 años o más.
 - Voz: si usas el chat por voz, el servicio de reconocimiento de voz de tu dispositivo convierte el audio en texto. Calivia recibe el texto, no el audio.
 - Datos técnicos: identificador del dispositivo para notificaciones y datos de sesión.
 
-Parte de esta información también se guarda en tu dispositivo, como tu sesión, tu perfil y tus contactos de crisis, para que la ayuda funcione sin conexión. Se borra al cerrar sesión o desinstalar la app.
+Parte de esta información también se guarda en tu dispositivo, como tu sesión, tu perfil, tus contactos de crisis y el borrador de tu diario, para que la ayuda funcione sin conexión. Se borra al cerrar sesión o desinstalar la app.
 
 5. Para qué usamos tus datos
-Para darte el servicio: responder en el chat, recordar el contexto de tus conversaciones, generar reflexiones, enviar recordatorios y notificaciones, y activar el protocolo de crisis. No vendemos tus datos ni los usamos para publicidad.
+Para darte el servicio: responder en el chat, recordar el contexto de tus conversaciones, guardar tu diario y, si lo pides, generar reflexiones sobre lo que escribiste, enviar recordatorios y notificaciones, y activar el protocolo de crisis. No vendemos tus datos ni los usamos para publicidad.
 
 6. Con quién se comparten
 Usamos estos proveedores para operar Calivia:
 - Supabase: alojamiento de la base de datos y los archivos.
-- OpenAI: procesa tus mensajes, entradas del diario y registros para generar respuestas, reflexiones y resúmenes.
+- OpenAI: procesa tus mensajes del chat y tus registros para generar respuestas y resúmenes. Las entradas del diario solo se envían a OpenAI si pides una reflexión sobre ellas.
 - Google Firebase: entrega notificaciones. Los avisos no incluyen tu nombre ni tu contenido.
 - Resend: envío de correos de recuperación y avisos.
 - Vercel: alojamiento de la versión web.
