@@ -3,7 +3,7 @@ import type { Strings } from './lib/i18n';
 const strings: Strings = {
   es: {
     directoryTitle: 'Tu tarjeta en "Agendar"',
-    directoryHint: 'Los pacientes de Calivia verán tu nombre, título, biografía, país y valor, con la marca "Profesional verificado por Calivia" (tu número de registro no se muestra), con un botón a tu agenda. El pago y la sesión van directo contigo.',
+    directoryHint: 'Los pacientes de Calivia verán tu foto, nombre, título, biografía, país y valor, con la marca "Profesional verificado por Calivia" (tu número de registro no se muestra), con un botón a tu agenda. El pago y la sesión van directo contigo.',
     professionalTitle: 'Título profesional',
     professionalTitlePlaceholder: 'Ej. Psicólogo clínico',
     bookingUrl: 'Enlace de tu agenda',
@@ -67,7 +67,7 @@ const strings: Strings = {
   },
   en: {
     directoryTitle: 'Your card in "Book"',
-    directoryHint: 'Calivia patients will see your name, title, bio, country and rate, marked "Professional verified by Calivia" (your license number is not shown), with a button to your booking page. Payment and the session are directly with you.',
+    directoryHint: 'Calivia patients will see your photo, name, title, bio, country and rate, marked "Professional verified by Calivia" (your license number is not shown), with a button to your booking page. Payment and the session are directly with you.',
     professionalTitle: 'Professional title',
     professionalTitlePlaceholder: 'E.g. Clinical psychologist',
     bookingUrl: 'Booking page link',
@@ -131,7 +131,7 @@ const strings: Strings = {
   },
   pt: {
     directoryTitle: 'Seu cartão em "Agendar"',
-    directoryHint: 'Os pacientes da Calivia verão seu nome, título, biografia, país e valor, com a marca "Profissional verificado pela Calivia" (seu número de registro não é mostrado), com um botão para sua agenda. O pagamento e a sessão são direto com você.',
+    directoryHint: 'Os pacientes da Calivia verão sua foto, nome, título, biografia, país e valor, com a marca "Profissional verificado pela Calivia" (seu número de registro não é mostrado), com um botão para sua agenda. O pagamento e a sessão são direto com você.',
     professionalTitle: 'Título profissional',
     professionalTitlePlaceholder: 'Ex. Psicólogo clínico',
     bookingUrl: 'Link da sua agenda',
