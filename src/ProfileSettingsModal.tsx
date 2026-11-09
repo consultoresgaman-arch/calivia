@@ -30,6 +30,10 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
   const [phone, setPhone] = useState('');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [bio, setBio] = useState('');
+  const [professionalTitle, setProfessionalTitle] = useState('');
+  const [bookingUrl, setBookingUrl] = useState('');
+  const [sessionPrice, setSessionPrice] = useState('');
+  const [directoryVisible, setDirectoryVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -80,6 +84,25 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     setDeletePassword('');
     setDeleteError(null);
     getAvatarSignedUrl(profile.avatar_path).then(setAvatarUrl);
+    if (profile.role === 'psychologist') {
+      setProfessionalTitle('');
+      setBookingUrl('');
+      setSessionPrice('');
+      setDirectoryVisible(false);
+      // Datos del directorio de "Agendar": no vienen con la sesión, se leen aquí.
+      void supabase
+        .from('profiles')
+        .select('professional_title, booking_url, session_price, directory_visible')
+        .eq('id', profile.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (!data) return;
+          setProfessionalTitle(data.professional_title ?? '');
+          setBookingUrl(data.booking_url ?? '');
+          setSessionPrice(data.session_price ?? '');
+          setDirectoryVisible(Boolean(data.directory_visible));
+        });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -119,12 +142,30 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
 
   async function handleSave() {
     if (!profile) return;
+    const url = bookingUrl.trim();
+    if (isPsychologist && url && !/^https:\/\/\S+$/.test(url)) {
+      setMessage(t('bookingUrlInvalid'));
+      return;
+    }
+    if (isPsychologist && directoryVisible && !url) {
+      setMessage(t('bookingUrlRequired'));
+      return;
+    }
     setSaving(true);
     setMessage(null);
     try {
+      const directoryFields = isPsychologist
+        ? {
+            professional_title: professionalTitle.trim() || null,
+            booking_url: url || null,
+            session_price: sessionPrice.trim() || null,
+            directory_visible: directoryVisible,
+          }
+        : {};
       const { error } = await supabase
         .from('profiles')
         .update({
+          ...directoryFields,
           preferred_name: preferredName.trim() || null,
           occupation: occupation.trim() || null,
           persona_name_espejo: personaNameEspejo.trim() || null,
@@ -333,6 +374,24 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
               <span>{t('bio')}</span>
               <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={4} maxLength={500} placeholder={t('bioPlaceholder')} />
             </label>
+            <h3 className="psm-subtitle">{t('directoryTitle')}</h3>
+            <p className="psm-hint">{t('directoryHint')}</p>
+            <label className="psm-field">
+              <span>{t('professionalTitle')}</span>
+              <input type="text" value={professionalTitle} onChange={(e) => setProfessionalTitle(e.target.value)} maxLength={80} placeholder={t('professionalTitlePlaceholder')} />
+            </label>
+            <label className="psm-field">
+              <span>{t('bookingUrl')}</span>
+              <input type="url" inputMode="url" value={bookingUrl} onChange={(e) => setBookingUrl(e.target.value)} maxLength={300} placeholder="https://calendly.com/…" />
+            </label>
+            <label className="psm-field">
+              <span>{t('sessionPrice')}</span>
+              <input type="text" value={sessionPrice} onChange={(e) => setSessionPrice(e.target.value)} maxLength={60} placeholder={t('sessionPricePlaceholder')} />
+            </label>
+            <label className="psm-check">
+              <input type="checkbox" checked={directoryVisible} onChange={(e) => setDirectoryVisible(e.target.checked)} />
+              <span>{t('directoryVisible')}</span>
+            </label>
           </div>
         )}
 
@@ -391,6 +450,8 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
         .psm-avatar-btn:hover:not(:disabled) { border-color: var(--primary-200); color: var(--text); }
         .psm-avatar-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
+        .psm-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; color: var(--text); cursor: pointer; }
+        .psm-check input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--primary); }
         .psm-fields { display: flex; flex-direction: column; gap: 14px; }
         .psm-subtitle { margin: 0; font-size: 14px; color: var(--text); }
         .psm-hint { margin: -8px 0 0; font-size: 12px; color: var(--text-soft); line-height: 1.5; }

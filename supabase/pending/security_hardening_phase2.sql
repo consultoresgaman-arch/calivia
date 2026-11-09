@@ -25,7 +25,8 @@ REVOKE SELECT ON public.profiles FROM anon, authenticated;
 GRANT SELECT (
   id, full_name, role, country, is_premium, premium_until, created_at, avatar_path, phone,
   license_number, bio, preferred_name, occupation, terms_accepted_at, terms_version,
-  persona_name_espejo, persona_name_amigo, persona_name_acompanante
+  persona_name_espejo, persona_name_amigo, persona_name_acompanante,
+  professional_title, booking_url, session_price, directory_visible
 ) ON public.profiles TO anon;
 
 NOTIFY pgrst, 'reload schema';
