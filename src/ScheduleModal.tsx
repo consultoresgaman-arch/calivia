@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X, CalendarClock, Mail, BadgeCheck, Info } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { getAvatarSignedUrl } from './lib/avatar';
 import { useLanguage, useT } from './lib/i18n';
 import { localizeCountryLabel } from './lib/crisis';
 import strings from './ScheduleModal.i18n';
@@ -16,6 +17,7 @@ interface Specialist {
   professional_title: string | null;
   bio: string | null;
   country: string | null;
+  avatar_path: string | null;
   booking_url: string;
   session_price: string | null;
   is_linked: boolean;
@@ -29,6 +31,22 @@ const FALLBACK_PRICE = '$35.000 CLP (~$38 USD)';
 
 function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('');
+}
+
+// Foto del especialista; mientras carga, o si no tiene, muestra sus iniciales.
+function SpecialistAvatar({ name, path }: { name: string; path: string | null }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    setUrl(null);
+    getAvatarSignedUrl(path).then((signed) => { if (mounted) setUrl(signed); });
+    return () => { mounted = false; };
+  }, [path]);
+  return (
+    <div className="schedule-avatar" aria-hidden="true">
+      {url ? <img src={url} alt="" onError={() => setUrl(null)} /> : initials(name)}
+    </div>
+  );
 }
 
 export default function ScheduleModal({ open, onClose }: Props) {
@@ -83,7 +101,7 @@ export default function ScheduleModal({ open, onClose }: Props) {
           specialists.map((s) => (
             <article key={s.id} className="schedule-card">
               <div className="schedule-head">
-                <div className="schedule-avatar" aria-hidden="true">{initials(s.full_name)}</div>
+                <SpecialistAvatar name={s.full_name} path={s.avatar_path} />
                 <div>
                   <h3>{s.full_name}</h3>
                   {s.professional_title && <p className="schedule-role">{s.professional_title}</p>}
@@ -154,7 +172,9 @@ export default function ScheduleModal({ open, onClose }: Props) {
           width: 46px; height: 46px; flex-shrink: 0; border-radius: 50%;
           background: linear-gradient(135deg, var(--primary-200), var(--primary));
           color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 16px;
+          overflow: hidden;
         }
+        .schedule-avatar img { width: 100%; height: 100%; object-fit: cover; }
         .schedule-head h3 { margin: 0; font-size: 15.5px; font-weight: 700; color: var(--text); }
         .schedule-role { margin: 2px 0 0; font-size: 13px; color: var(--text-soft); }
         .schedule-linked { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; background: rgba(112,130,56,0.12); color: var(--primary-600); font-size: 11.5px; font-weight: 700; }
