@@ -331,7 +331,7 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
             </label>
             <label className="psm-field">
               <span>{t('bio')}</span>
-              <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={4} placeholder={t('bioPlaceholder')} />
+              <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={4} maxLength={500} placeholder={t('bioPlaceholder')} />
             </label>
           </div>
         )}

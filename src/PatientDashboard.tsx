@@ -56,10 +56,10 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const [sosInitialGrounding, setSosInitialGrounding] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [pendingLinks, setPendingLinks] = useState<{ psychologistId: string; name: string }[]>([]);
+  const [pendingLinks, setPendingLinks] = useState<{ psychologistId: string; name: string; bio: string | null }[]>([]);
   const [linkActionId, setLinkActionId] = useState<string | null>(null);
   const [approvalCode, setApprovalCode] = useState<{ name: string; code: string } | null>(null);
-  const [linkedProfessional, setLinkedProfessional] = useState<string | null>(null);
+  const [linkedProfessional, setLinkedProfessional] = useState<{ name: string; bio: string | null } | null>(null);
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const [revokingLink, setRevokingLink] = useState(false);
   const [revokeError, setRevokeError] = useState(false);
@@ -127,10 +127,11 @@ export default function PatientDashboard({ onExitToHome }: Props) {
     const { data: links } = await supabase.from('patient_links').select('psychologist_id').eq('status', 'pending');
     if (!links || links.length === 0) { setPendingLinks([]); return; }
     const ids = links.map((l) => l.psychologist_id);
-    const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+    const { data: profs } = await supabase.from('profiles').select('id, full_name, bio').in('id', ids);
     setPendingLinks(links.map((l) => ({
       psychologistId: l.psychologist_id,
       name: profs?.find((p) => p.id === l.psychologist_id)?.full_name ?? t('defaultProfessional'),
+      bio: profs?.find((p) => p.id === l.psychologist_id)?.bio?.trim() || null,
     })));
   }
 
@@ -142,8 +143,8 @@ export default function PatientDashboard({ onExitToHome }: Props) {
       .eq('status', 'accepted')
       .maybeSingle();
     if (!link) { setLinkedProfessional(null); return; }
-    const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', link.psychologist_id).maybeSingle();
-    setLinkedProfessional(prof?.full_name ?? t('defaultProfessional'));
+    const { data: prof } = await supabase.from('profiles').select('full_name, bio').eq('id', link.psychologist_id).maybeSingle();
+    setLinkedProfessional({ name: prof?.full_name ?? t('defaultProfessional'), bio: prof?.bio?.trim() || null });
   }
 
   useEffect(() => {
@@ -260,6 +261,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
                       {pendingLinks.map((l) => (
                         <div key={l.psychologistId} className="user-menu-link-row">
                           <p>{t('linkRequestText', { name: l.name })}</p>
+                          {l.bio && <p className="user-menu-link-bio">{l.bio}</p>}
                           <div className="user-menu-link-actions">
                             <button
                               type="button"
@@ -293,7 +295,8 @@ export default function PatientDashboard({ onExitToHome }: Props) {
                   {linkedProfessional && (
                     <div className="user-menu-links">
                       <span>{t('linkedProfessionalTitle')}</span>
-                      <p>{confirmingRevoke ? t('revokeLinkConfirm', { name: linkedProfessional }) : linkedProfessional}</p>
+                      <p>{confirmingRevoke ? t('revokeLinkConfirm', { name: linkedProfessional.name }) : linkedProfessional.name}</p>
+                      {!confirmingRevoke && linkedProfessional.bio && <p className="user-menu-link-bio">{linkedProfessional.bio}</p>}
                       {revokeError && <p>{t('revokeLinkFailed')}</p>}
                       <div className="user-menu-link-actions">
                         {confirmingRevoke ? (
@@ -504,6 +507,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
         .user-menu-links { display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border-soft); }
         .user-menu-links > span { font-size: 12px; font-weight: 700; color: var(--text); }
         .user-menu-link-row { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 10px; background: var(--surface-2); }
+        .user-menu-link-bio { margin: 0; padding-left: 8px; border-left: 2px solid var(--primary-200); font-size: 12px !important; font-style: italic; color: var(--text-soft); line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
         .user-menu-link-row p { margin: 0; font-size: 12px; color: var(--text-soft); line-height: 1.4; }
         .user-menu-link-actions { display: flex; gap: 6px; }
         .user-menu-link-accept, .user-menu-link-reject { flex: 1; padding: 6px 8px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; border: none; }
