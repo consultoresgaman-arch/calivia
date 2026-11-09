@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { NotebookPen, Save, Trash2, LifeBuoy, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { NotebookPen, Save, Trash2, Wind, Vibrate, Sparkles } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useLanguage, useT, type LanguageCode } from './lib/i18n';
 import { getSessionToken } from './lib/session';
@@ -10,6 +10,7 @@ import { detectRiskKeyword } from './lib/riskDetection';
 interface Props {
   userId: string;
   onOpenSos: () => void;
+  onOpenGrounding: () => void;
 }
 
 interface JournalEntry {
@@ -50,7 +51,7 @@ function writeDraft(userId: string, value: string): void {
 // Espacio para escribir sin respuesta: lo escrito solo se guarda, para releerlo
 // cuando la persona quiera. La IA solo lo lee si se pide una reflexión de un escrito;
 // el protocolo de crisis lo revisa siempre.
-export default function JournalSpace({ userId, onOpenSos }: Props) {
+export default function JournalSpace({ userId, onOpenSos, onOpenGrounding }: Props) {
   const { lang } = useLanguage();
   const t = useT(strings);
   // El borrador vive en el dispositivo para no perder lo escrito si la app se cierra.
@@ -65,6 +66,14 @@ export default function JournalSpace({ userId, onOpenSos }: Props) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [reflectingId, setReflectingId] = useState<string | null>(null);
   const [reflectionError, setReflectionError] = useState<{ id: string; message: string } | null>(null);
+  // Ayuda de crisis mostrada dentro del escrito que la activó, junto a su reflexión.
+  const [entryCrisis, setEntryCrisis] = useState<Record<string, string>>({});
+  const crisisRef = useRef<HTMLDivElement | null>(null);
+
+  // Al activarse el protocolo, la ayuda se lleva a la vista para que no quede oculta.
+  useEffect(() => {
+    if (crisisReply) crisisRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [crisisReply]);
 
   useEffect(() => { writeDraft(userId, content); }, [userId, content]);
 
@@ -139,13 +148,13 @@ export default function JournalSpace({ userId, onOpenSos }: Props) {
         return;
       }
       if (!res.ok || !json.reflection) throw new Error(`reflect ${res.status}`);
-      if (json.crisis) {
-        setCrisisReply(json.reflection as string);
-        return;
-      }
+      const reflection = (json.crisis && json.containment ? json.containment : json.reflection) as string;
       setEntries((prev) => prev.map((x) => (x.id === entry.id
-        ? { ...x, ai_reflection: json.reflection as string, suggested_tool: null }
+        ? { ...x, ai_reflection: reflection, suggested_tool: null }
         : x)));
+      if (json.crisis && json.crisisReply) {
+        setEntryCrisis((prev) => ({ ...prev, [entry.id]: json.crisisReply as string }));
+      }
     } catch (err) {
       console.error('[Calivia] pedir reflexión falló:', err);
       setReflectionError({ id: entry.id, message: t('reflectionFailed') });
@@ -162,6 +171,29 @@ export default function JournalSpace({ userId, onOpenSos }: Props) {
     }
     setEntries((prev) => prev.filter((entry) => entry.id !== id));
     setConfirmDeleteId(null);
+  }
+
+  function renderTools() {
+    return (
+      <div className="js-crisis-actions">
+        <button type="button" className="js-crisis-btn" onClick={onOpenSos}>
+          <Wind size={16} strokeWidth={2} /><span>{t('breatheNow')}</span>
+        </button>
+        <button type="button" className="js-crisis-btn js-crisis-btn-soft" onClick={onOpenGrounding}>
+          <Vibrate size={16} strokeWidth={2} /><span>{t('grounding')}</span>
+        </button>
+      </div>
+    );
+  }
+
+  function renderCrisis(text: string) {
+    return (
+      <div className="js-crisis" role="alert">
+        <strong>{t('crisisTitle')}</strong>
+        <p>{text}</p>
+        {renderTools()}
+      </div>
+    );
   }
 
   return (
@@ -192,12 +224,7 @@ export default function JournalSpace({ userId, onOpenSos }: Props) {
       </form>
 
       {crisisReply && (
-        <div className="js-crisis" role="alert">
-          <p>{crisisReply}</p>
-          <button type="button" className="js-crisis-btn" onClick={onOpenSos}>
-            <LifeBuoy size={16} strokeWidth={2} /><span>{t('openHelp')}</span>
-          </button>
-        </div>
+        <div ref={crisisRef}>{renderCrisis(crisisReply)}</div>
       )}
 
       <div className="js-entries">
@@ -230,6 +257,10 @@ export default function JournalSpace({ userId, onOpenSos }: Props) {
                   <Sparkles size={13} strokeWidth={2} />
                   <span>{reflectingId === entry.id ? t('reflecting') : t('askReflection')}</span>
                 </button>
+              )}
+              {entryCrisis[entry.id] ? renderCrisis(entryCrisis[entry.id]) : (
+                // Un escrito con señal de riesgo siempre ofrece las herramientas a mano.
+                detectRiskKeyword(entry.content) && renderTools()
               )}
               {reflectionError?.id === entry.id && <p className="js-reflect-error">{reflectionError.message}</p>}
               {confirmDeleteId === entry.id ? (
@@ -273,7 +304,12 @@ export default function JournalSpace({ userId, onOpenSos }: Props) {
         }
         .js-submit:disabled { opacity: 0.55; cursor: not-allowed; }
 
-        .js-crisis { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--radius-sm); background: rgba(196,154,90,0.12); }
+        .js-crisis { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding: 14px; border-radius: var(--radius-sm); background: rgba(196,154,90,0.12); border: 1px solid rgba(196,154,90,0.35); }
+        .js-crisis strong { font-size: 14.5px; color: var(--text); }
+        .js-crisis-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .js-crisis .js-crisis-actions { margin-top: 0; }
+        .js-crisis-actions .js-crisis-btn { flex: 1 1 140px; }
+        .js-crisis-btn-soft { background: var(--surface) !important; color: var(--primary-600) !important; border: 1px solid var(--primary-200) !important; }
         .js-crisis p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text); white-space: pre-wrap; }
         .js-crisis-btn { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 11px; border: none; border-radius: 999px; background: var(--primary); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; }
 

@@ -66,6 +66,9 @@ export default function PatientDashboard({ onExitToHome }: Props) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const calmSpace = useHeartbeatSound();
 
+  // Las pestañas viven en la cabecera fija; al cambiar de sección se empieza desde arriba.
+  useEffect(() => { window.scrollTo(0, 0); }, [section]);
+
   useEffect(() => {
     let active = true;
     initVoiceShortcut();
@@ -337,6 +340,31 @@ export default function PatientDashboard({ onExitToHome }: Props) {
             </div>
           </div>
         </div>
+        <nav className="tabs-bar" aria-label="Secciones">
+          <div className="section-tabs">
+            <button className={`stab ${section === 'chat' ? 'active' : ''}`} onClick={() => setSection('chat')} type="button">
+              <MessageCircle size={16} strokeWidth={2} /><span>{t('tabChat')}</span>
+            </button>
+            <button className={`stab ${section === 'breathe' ? 'active' : ''}`} onClick={() => setSection('breathe')} type="button">
+              <Wind size={16} strokeWidth={2} /><span>{t('tabBreathe')}</span>
+            </button>
+            <button className={`stab ${section === 'games' ? 'active' : ''}`} onClick={() => setSection('games')} type="button">
+              <Gamepad2 size={16} strokeWidth={2} /><span>{t('tabGames')}</span>
+            </button>
+            <button className={`stab ${section === 'progress' ? 'active' : ''}`} onClick={() => setSection('progress')} type="button">
+              <TrendingUp size={16} strokeWidth={2} /><span>{t('tabProgress')}</span>
+            </button>
+            <button className={`stab ${section === 'tasks' ? 'active' : ''}`} onClick={() => setSection('tasks')} type="button">
+              <CheckSquare size={16} strokeWidth={2} /><span>{t('tabTasks')}</span>
+            </button>
+            <button className={`stab ${section === 'sounds' ? 'active' : ''}`} onClick={() => setSection('sounds')} type="button">
+              <CloudRain size={16} strokeWidth={2} /><span>{t('tabSounds')}</span>
+            </button>
+            <button className={`stab ${section === 'journal' ? 'active' : ''}`} onClick={() => setSection('journal')} type="button">
+              <NotebookPen size={16} strokeWidth={2} /><span>{t('tabJournal')}</span>
+            </button>
+          </div>
+        </nav>
       </header>
 
       <main className="refugio">
@@ -353,29 +381,6 @@ export default function PatientDashboard({ onExitToHome }: Props) {
 
         {section === 'chat' && <DailySpark />}
 
-        <div className="section-tabs">
-          <button className={`stab ${section === 'chat' ? 'active' : ''}`} onClick={() => setSection('chat')} type="button">
-            <MessageCircle size={16} strokeWidth={2} /><span>{t('tabChat')}</span>
-          </button>
-          <button className={`stab ${section === 'breathe' ? 'active' : ''}`} onClick={() => setSection('breathe')} type="button">
-            <Wind size={16} strokeWidth={2} /><span>{t('tabBreathe')}</span>
-          </button>
-          <button className={`stab ${section === 'games' ? 'active' : ''}`} onClick={() => setSection('games')} type="button">
-            <Gamepad2 size={16} strokeWidth={2} /><span>{t('tabGames')}</span>
-          </button>
-          <button className={`stab ${section === 'progress' ? 'active' : ''}`} onClick={() => setSection('progress')} type="button">
-            <TrendingUp size={16} strokeWidth={2} /><span>{t('tabProgress')}</span>
-          </button>
-          <button className={`stab ${section === 'tasks' ? 'active' : ''}`} onClick={() => setSection('tasks')} type="button">
-            <CheckSquare size={16} strokeWidth={2} /><span>{t('tabTasks')}</span>
-          </button>
-          <button className={`stab ${section === 'sounds' ? 'active' : ''}`} onClick={() => setSection('sounds')} type="button">
-            <CloudRain size={16} strokeWidth={2} /><span>{t('tabSounds')}</span>
-          </button>
-          <button className={`stab ${section === 'journal' ? 'active' : ''}`} onClick={() => setSection('journal')} type="button">
-            <NotebookPen size={16} strokeWidth={2} /><span>{t('tabJournal')}</span>
-          </button>
-        </div>
 
         {section === 'chat' && (
           <div className="chat-section anim-fade">
@@ -430,7 +435,11 @@ export default function PatientDashboard({ onExitToHome }: Props) {
 
         {section === 'journal' && (
           <div className="progress-section anim-fade">
-            <JournalSpace userId={profile!.id} onOpenSos={() => setSosOpen(true)} />
+            <JournalSpace
+              userId={profile!.id}
+              onOpenSos={() => setSosOpen(true)}
+              onOpenGrounding={() => { setSosInitialGrounding(true); setSosOpen(true); }}
+            />
           </div>
         )}
       </main>
@@ -521,6 +530,7 @@ export default function PatientDashboard({ onExitToHome }: Props) {
 
         .refugio { max-width: 560px; margin: 0 auto; padding: 16px 20px 100px; display: flex; flex-direction: column; gap: 16px; min-height: calc(100vh - 60px); }
 
+        .tabs-bar { max-width: 560px; margin: 0 auto; padding: 0 20px 10px; }
         .section-tabs { display: flex; gap: 6px; background: var(--surface-2); padding: 5px; border-radius: 14px; border: 1px solid var(--border-soft); overflow-x: auto; scrollbar-width: none; }
         .section-tabs::-webkit-scrollbar { display: none; }
         .stab { flex: 1 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 12px; border: none; background: transparent; color: var(--text-soft); font-size: 13px; font-weight: 600; border-radius: 10px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
