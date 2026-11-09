@@ -22,7 +22,7 @@ Calivia es una herramienta digital de acompañamiento, reflexión y desarrollo p
 Calivia es solo para personas de 18 años o más.
 
 4. Datos que recogemos
-- Cuenta: nombre, contraseña (guardada como hash, nunca en texto legible), país, y de forma opcional foto, nombre preferido, ocupación y correo de recuperación. Si eres especialista: teléfono, matrícula y biografía.
+- Cuenta: nombre, contraseña (guardada como hash, nunca en texto legible), país, y de forma opcional foto, nombre preferido, ocupación y correo de recuperación. Si eres especialista: teléfono, matrícula, biografía y, si activas tu tarjeta en "Agendar", título, enlace de agenda y valor de la sesión. Esa tarjeta (nombre, título, biografía, país y valor; nunca el número de registro) la ven todos los pacientes de Calivia; puedes desactivarla cuando quieras.
 - Salud y bienestar: registros de ánimo, mensajes del chat, entradas del diario, tareas y tus respuestas a ellas, y alertas de posible riesgo.
 - Contactos de confianza: nombre y teléfono de las personas que tú agregues. Agrégalas solo si cuentas con su permiso.
 - Voz: si usas el chat por voz, el servicio de reconocimiento de voz de tu dispositivo convierte el audio en texto. Calivia recibe el texto, no el audio.
