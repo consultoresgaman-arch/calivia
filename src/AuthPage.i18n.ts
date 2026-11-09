@@ -29,7 +29,7 @@ const strings: Strings = {
     invalidOrExpiredCode: 'Código inválido o vencido',
     confirmAdult: 'Confirmo que tengo 18 años o más.',
     privacyPolicy: 'Política de privacidad',
-    specialistSignupNote: '¿Eres especialista? Crea tu cuenta y escribe a consultoresgaman@gmail.com para activarla.',
+    specialistSignupNote: '¿Eres especialista? Crea tu cuenta y escribe a consultoresgaman@gmail.com con tu nombre de usuario, tu número de registro profesional y tu país para activarla.',
     unexpectedError: 'Error inesperado',
   },
   en: {
@@ -60,7 +60,7 @@ const strings: Strings = {
     invalidOrExpiredCode: 'Invalid or expired code',
     confirmAdult: 'I confirm that I am 18 or older.',
     privacyPolicy: 'Privacy policy',
-    specialistSignupNote: 'Are you a specialist? Create your account and write to consultoresgaman@gmail.com to activate it.',
+    specialistSignupNote: 'Are you a specialist? Create your account and write to consultoresgaman@gmail.com with your username, professional registration number and country to activate it.',
     unexpectedError: 'Unexpected error',
   },
   pt: {
@@ -91,7 +91,7 @@ const strings: Strings = {
     invalidOrExpiredCode: 'Código inválido ou expirado',
     confirmAdult: 'Confirmo que tenho 18 anos ou mais.',
     privacyPolicy: 'Política de privacidade',
-    specialistSignupNote: 'É especialista? Crie sua conta e escreva para consultoresgaman@gmail.com para ativá-la.',
+    specialistSignupNote: 'É especialista? Crie sua conta e escreva para consultoresgaman@gmail.com com seu nome de usuário, seu número de registro profissional e seu país para ativá-la.',
     unexpectedError: 'Erro inesperado',
   },
 };
