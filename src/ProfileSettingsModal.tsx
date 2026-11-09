@@ -28,7 +28,6 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
   const [personaNameAmigo, setPersonaNameAmigo] = useState('');
   const [personaNameAcompanante, setPersonaNameAcompanante] = useState('');
   const [phone, setPhone] = useState('');
-  const [licenseNumber, setLicenseNumber] = useState('');
   const [bio, setBio] = useState('');
   const [professionalTitle, setProfessionalTitle] = useState('');
   const [bookingUrl, setBookingUrl] = useState('');
@@ -68,7 +67,6 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
     setPersonaNameAmigo(profile.persona_name_amigo ?? '');
     setPersonaNameAcompanante(profile.persona_name_acompanante ?? '');
     setPhone(profile.phone ?? '');
-    setLicenseNumber(profile.license_number ?? '');
     setBio(profile.bio ?? '');
     setMessage(null);
     setAvatarMessage(null);
@@ -172,7 +170,6 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
           persona_name_amigo: personaNameAmigo.trim() || null,
           persona_name_acompanante: personaNameAcompanante.trim() || null,
           phone: phone.trim() || null,
-          license_number: licenseNumber.trim() || null,
           bio: bio.trim() || null,
         })
         .eq('id', profile.id);
@@ -365,10 +362,6 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
             <label className="psm-field">
               <span>{t('phone')}</span>
               <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+56 9 1234 5678" />
-            </label>
-            <label className="psm-field">
-              <span>{t('licenseNumber')}</span>
-              <input type="text" value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder={t('licensePlaceholder')} />
             </label>
             <label className="psm-field">
               <span>{t('bio')}</span>

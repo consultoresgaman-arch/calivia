@@ -16,8 +16,6 @@ interface Specialist {
   professional_title: string | null;
   bio: string | null;
   country: string | null;
-  license_number: string | null;
-  license_country: string | null;
   booking_url: string;
   session_price: string | null;
   is_linked: boolean;
@@ -93,16 +91,15 @@ export default function ScheduleModal({ open, onClose }: Props) {
                 </div>
               </div>
 
-              {s.license_number && (
-                <p className="schedule-license">
-                  <BadgeCheck size={14} strokeWidth={2} />
-                  <span>
-                    {t('license', { number: s.license_number })}
-                    {s.license_country ? ` · ${localizeCountryLabel(s.license_country, lang)}` : ''}
-                    {' · '}{t('verified')}
-                  </span>
-                </p>
-              )}
+              {/* Solo aparecen especialistas con aprobación vigente. El número de
+                  registro no se muestra para que no se pueda copiar. */}
+              <p className="schedule-license">
+                <BadgeCheck size={14} strokeWidth={2} />
+                <span>
+                  {t('verified')}
+                  {s.country ? ` · ${localizeCountryLabel(s.country, lang)}` : ''}
+                </span>
+              </p>
 
               {s.bio && <p className="schedule-bio">{s.bio}</p>}
 
