@@ -24,6 +24,9 @@ const strings: Strings = {
     reflectionLabel: 'Reflexión de Calivia',
     reflectionLimit: 'Llegaste al límite de 5 reflexiones de hoy. Mañana podrás pedir más.',
     reflectionFailed: 'No se pudo generar la reflexión. Inténtalo de nuevo.',
+    crisisTitle: 'No estás sola ni solo con esto',
+    breatheNow: 'Respirar ahora',
+    grounding: 'Anclaje por vibración',
   },
   en: {
     title: 'Mindfulness Journal',
@@ -48,6 +51,9 @@ const strings: Strings = {
     reflectionLabel: "Calivia's reflection",
     reflectionLimit: "You've reached today's limit of 5 reflections. You can ask for more tomorrow.",
     reflectionFailed: "Couldn't create the reflection. Please try again.",
+    crisisTitle: "You're not alone with this",
+    breatheNow: 'Breathe now',
+    grounding: 'Vibration grounding',
   },
   pt: {
     title: 'Diário de Consciência',
@@ -72,6 +78,9 @@ const strings: Strings = {
     reflectionLabel: 'Reflexão da Calivia',
     reflectionLimit: 'Você atingiu o limite de 5 reflexões de hoje. Amanhã poderá pedir mais.',
     reflectionFailed: 'Não foi possível gerar a reflexão. Tente novamente.',
+    crisisTitle: 'Você não está sozinha nem sozinho com isso',
+    breatheNow: 'Respirar agora',
+    grounding: 'Ancoragem por vibração',
   },
 };
 
