@@ -116,3 +116,64 @@ export async function sendPushToUser(supabase: Supabase, userId: string, kind: P
     console.error('sendPushToUser falló:', err);
   }
 }
+
+export interface ReminderResult {
+  devices: number;
+  sent: number;
+  failed: number;
+  removed: number;
+}
+
+// Recordatorio libre enviado por un administrador (ver admin-reminder). Va sin
+// channel_id: la app no tiene canal de recordatorios y Android usa el genérico.
+// A diferencia de sendPushToUser, sí lanza error: quien lo llama necesita saber
+// si el envío falló.
+export async function sendReminderPush(
+  supabase: Supabase,
+  userIds: string[],
+  title: string,
+  body: string
+): Promise<ReminderResult> {
+  const result: ReminderResult = { devices: 0, sent: 0, failed: 0, removed: 0 };
+  if (userIds.length === 0) return result;
+
+  const rawAccount = Deno.env.get('FIREBASE_SERVICE_ACCOUNT');
+  if (!rawAccount) throw new Error('Falta FIREBASE_SERVICE_ACCOUNT');
+
+  const { data: devices, error } = await supabase.from('device_tokens').select('token').in('user_id', userIds);
+  if (error) throw error;
+  if (!devices || devices.length === 0) return result;
+  result.devices = devices.length;
+
+  const account = JSON.parse(rawAccount) as ServiceAccount;
+  const accessToken = await getAccessToken(account);
+
+  await Promise.all(devices.map(async ({ token }) => {
+    const res = await fetch(`https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: {
+          token,
+          notification: { title, body },
+          data: { kind: 'reminder' },
+          android: { priority: 'HIGH', notification: { visibility: 'PRIVATE' } },
+        },
+      }),
+    });
+    if (res.ok) {
+      result.sent++;
+      return;
+    }
+    const detail = await res.text().catch(() => '');
+    if (res.status === 404 || detail.includes('UNREGISTERED')) {
+      await supabase.from('device_tokens').delete().eq('token', token as string);
+      result.removed++;
+      return;
+    }
+    result.failed++;
+    console.error('sendReminderPush: FCM error', res.status, detail.slice(0, 200));
+  }));
+
+  return result;
+}
