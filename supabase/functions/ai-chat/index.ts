@@ -802,6 +802,15 @@ function pickFallback(msg: string, lang: Lang): string {
   return replies[msg.length % replies.length];
 }
 
+// Si el modelo agotó max_tokens, la respuesta termina a mitad de frase: se recorta
+// hasta el último cierre de frase para no mostrarla inconclusa. Si no hay ninguno
+// razonable (texto de una sola frase larga), se deja como vino.
+function trimToLastSentence(text: string): string {
+  const match = text.match(/^[\s\S]*(?:[.!?…]|\p{Extended_Pictographic})(?:["”»)]|\p{Extended_Pictographic}|️)*/u);
+  const trimmed = match?.[0]?.trim() ?? '';
+  return trimmed.length >= text.length * 0.4 ? trimmed : text;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
   try {
@@ -1010,7 +1019,9 @@ Deno.serve(async (req: Request) => {
     const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: 'gpt-4o-mini', messages, temperature: 0.8, max_tokens: 150 }),
+      // Con 150 tokens las respuestas de los modos (más largas que las 2-3 frases del
+      // modo por defecto) se cortaban a mitad de frase. 400 da margen de sobra.
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages, temperature: 0.8, max_tokens: 400 }),
     });
 
     if (!aiRes.ok) {
@@ -1018,7 +1029,9 @@ Deno.serve(async (req: Request) => {
       throw new Error(`OpenAI ${aiRes.status}: ${txt.slice(0, 200)}`);
     }
     const aiJson = await aiRes.json();
-    const reply: string = aiJson.choices?.[0]?.message?.content?.trim() || '';
+    const choice = aiJson.choices?.[0];
+    let reply: string = choice?.message?.content?.trim() || '';
+    if (choice?.finish_reason === 'length') reply = trimToLastSentence(reply);
     if (!reply) throw new Error('Respuesta vacía de la IA.');
 
     await supabase.from('chat_logs').insert({ user_id: userId, role: 'assistant', content: reply, mode });
