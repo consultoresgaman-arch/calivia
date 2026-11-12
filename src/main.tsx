@@ -6,6 +6,7 @@ import { AuthProvider } from './lib/auth';
 import { LanguageProvider } from './lib/i18n';
 import ErrorBoundary from './ErrorBoundary';
 import UpdateNotice from './UpdateNotice';
+import InstallPrompt from './InstallPrompt';
 import './index.css';
 
 if ('serviceWorker' in navigator && !Capacitor.isNativePlatform()) {
@@ -22,6 +23,7 @@ createRoot(document.getElementById('root')!).render(
           <App />
         </AuthProvider>
         <UpdateNotice />
+        <InstallPrompt />
       </ErrorBoundary>
     </LanguageProvider>
   </StrictMode>
