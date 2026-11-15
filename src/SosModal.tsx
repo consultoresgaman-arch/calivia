@@ -25,9 +25,34 @@ const HEARTBEAT_CYCLE = { lub: 90, gapAfterLub: 100, dub: 120, rest: 700 };
 const VIBRATION_LIKELY_SUPPORTED =
   Capacitor.isNativePlatform() || (typeof navigator !== 'undefined' && 'vibrate' in navigator);
 
-type BreathPhase = 'inhale' | 'exhale';
+type BreathPhase = 'inhale' | 'holdIn' | 'exhale' | 'holdOut';
+type BreathPattern = 'box' | 'calm';
 
-const PHASE_DURATION: Record<BreathPhase, number> = { inhale: 4000, exhale: 6000 };
+// Cuadrada: 4-4-4-4 con retención. Relajante: exhalación más larga, sin retención.
+const PATTERNS: Record<BreathPattern, { phase: BreathPhase; secs: number }[]> = {
+  box: [
+    { phase: 'inhale', secs: 4 },
+    { phase: 'holdIn', secs: 4 },
+    { phase: 'exhale', secs: 4 },
+    { phase: 'holdOut', secs: 4 },
+  ],
+  calm: [
+    { phase: 'inhale', secs: 4 },
+    { phase: 'exhale', secs: 6 },
+  ],
+};
+const PATTERN_KEY = 'calivia.breath-pattern';
+
+function readPattern(): BreathPattern {
+  try {
+    return localStorage.getItem(PATTERN_KEY) === 'calm' ? 'calm' : 'box';
+  } catch {
+    return 'box';
+  }
+}
+
+interface BreathState { step: number; sec: number; cycle: number }
+const BREATH_START: BreathState = { step: 0, sec: 0, cycle: 0 };
 
 export default function SosModal({ open, onClose, initialGrounding }: Props) {
   const { profile, refreshProfile } = useAuth();
@@ -35,9 +60,14 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
   const t = useT(strings);
   const [country, setCountry] = useState(profile?.country ?? '');
   const [saving, setSaving] = useState(false);
-  const [phase, setPhase] = useState<BreathPhase>('inhale');
-  const [cycle, setCycle] = useState(0);
-  const timerRef = useRef<number | null>(null);
+  const [pattern, setPattern] = useState<BreathPattern>(readPattern);
+  const [breath, setBreath] = useState<BreathState>(BREATH_START);
+  // La figura parte contraída y se expande un instante después, para que el
+  // primer "Inhala" también se vea crecer.
+  const [breathStarted, setBreathStarted] = useState(false);
+  const steps = PATTERNS[pattern];
+  const { phase, secs } = steps[breath.step];
+  const cycle = breath.cycle;
 
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
   const [specialist, setSpecialist] = useState<LinkedSpecialist | null>(null);
@@ -87,24 +117,38 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
 
   useEffect(() => {
     if (!open) {
-      if (timerRef.current) window.clearTimeout(timerRef.current);
-      setPhase('inhale'); setCycle(0);
       stopAmbientAudio();
       setGroundingActive(false);
       stopGroundingVibration();
-      return;
     }
-    function next() {
-      setPhase((p) => {
-        const np: BreathPhase = p === 'inhale' ? 'exhale' : 'inhale';
-        if (np === 'inhale') setCycle((c) => c + 1);
-        timerRef.current = window.setTimeout(next, PHASE_DURATION[np]);
-        return np;
-      });
-    }
-    timerRef.current = window.setTimeout(next, PHASE_DURATION.inhale);
-    return () => { if (timerRef.current) window.clearTimeout(timerRef.current); };
   }, [open]);
+
+  // Avanza un segundo a la vez: el número del conteo y el cambio de fase salen
+  // del mismo reloj, así nunca se desfasan.
+  useEffect(() => {
+    setBreath(BREATH_START);
+    setBreathStarted(false);
+    if (!open) return;
+    const startTimer = window.setTimeout(() => setBreathStarted(true), 60);
+    const tick = window.setInterval(() => {
+      setBreath((s) => {
+        const list = PATTERNS[pattern];
+        if (s.sec + 1 < list[s.step].secs) return { ...s, sec: s.sec + 1 };
+        const step = (s.step + 1) % list.length;
+        return { step, sec: 0, cycle: step === 0 ? s.cycle + 1 : s.cycle };
+      });
+    }, 1000);
+    return () => { window.clearTimeout(startTimer); window.clearInterval(tick); };
+  }, [open, pattern]);
+
+  function choosePattern(p: BreathPattern) {
+    setPattern(p);
+    try {
+      localStorage.setItem(PATTERN_KEY, p);
+    } catch {
+      /* ignore */
+    }
+  }
 
   async function saveCountry(c: string) {
     setSaving(true);
@@ -177,7 +221,7 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
 
   useEffect(() => {
     if (!audioOn || !filterRef.current || !audioCtxRef.current) return;
-    const target = phase === 'inhale' ? 1200 : 400;
+    const target = phase === 'inhale' || phase === 'holdIn' ? 1200 : 400;
     filterRef.current.frequency.cancelScheduledValues(audioCtxRef.current.currentTime);
     filterRef.current.frequency.linearRampToValueAtTime(target, audioCtxRef.current.currentTime + 1);
   }, [phase, audioOn]);
@@ -222,7 +266,8 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
 
   if (!open) return null;
   const countryInfo = country ? CRISIS_LINES[country] : null;
-  const isExpanding = phase === 'inhale';
+  const isExpanded = breathStarted && (phase === 'inhale' || phase === 'holdIn');
+  const isHolding = phase === 'holdIn' || phase === 'holdOut';
 
   return (
     <div className="sos-overlay" onClick={onClose}>
@@ -260,13 +305,29 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
         <>
         <div className="breath-zone">
           <div className="breath-aura" />
-          <div
-            className={`organic-figure ${isExpanding ? 'expand' : 'contract'}`}
-            style={{ transition: `transform ${PHASE_DURATION[phase]}ms ease-in-out, border-radius ${PHASE_DURATION[phase]}ms ease-in-out` }}
-          />
-          <div className="breath-label" key={phase + cycle}>
-            <span className="breath-phase">{isExpanding ? t('inhale') : t('exhale')}</span>
-            {cycle > 0 && <span className="breath-cycle">{t('cycle', { n: cycle + 1 })}</span>}
+          <div className="breath-patterns" role="group" aria-label={t('patternLabel')}>
+            {(['box', 'calm'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                className={`breath-pattern ${pattern === p ? 'active' : ''}`}
+                aria-pressed={pattern === p}
+                onClick={() => choosePattern(p)}
+              >
+                {t(p === 'box' ? 'patternBox' : 'patternCalm')}
+              </button>
+            ))}
+          </div>
+          <div className="breath-figure-wrap">
+            <div
+              className={`organic-figure ${isExpanded ? 'expand' : 'contract'} ${isHolding ? 'holding' : ''}`}
+              style={{ transition: isHolding ? undefined : `transform ${secs * 1000}ms ease-in-out, border-radius ${secs * 1000}ms ease-in-out` }}
+            />
+            <span className="breath-count" key={`${breath.step}-${breath.sec}`} aria-hidden="true">{breath.sec + 1}</span>
+          </div>
+          <div className="breath-label" key={phase + cycle} aria-live="polite">
+            <span className="breath-phase">{t(phase)}</span>
+            <span className="breath-cycle">{t('cycle', { n: cycle + 1 })}</span>
           </div>
           <button className={`audio-toggle ${audioOn ? 'active' : ''}`} onClick={toggleAudio} type="button">
             {audioOn ? <Volume2 size={16} strokeWidth={2} /> : <VolumeX size={16} strokeWidth={2} />}
@@ -408,8 +469,31 @@ export default function SosModal({ open, onClose, initialGrounding }: Props) {
           transform: scale(0.7);
           border-radius: 48% 52% 52% 48% / 52% 48% 52% 48%;
         }
-        .breath-label { display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 44px; }
-        .breath-phase { font-size: 18px; font-weight: 700; color: var(--text); animation: fadeIn 0.3s ease; }
+        .breath-patterns {
+          display: flex; gap: 4px; padding: 4px; border-radius: 999px;
+          background: var(--surface-2); border: 1px solid var(--border); position: relative; z-index: 1;
+        }
+        .breath-pattern {
+          padding: 6px 12px; border: none; border-radius: 999px; background: transparent;
+          color: var(--text-soft); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+        }
+        .breath-pattern.active { background: var(--primary); color: #fff; }
+        .breath-figure-wrap {
+          position: relative; width: 190px; height: 190px;
+          display: grid; place-items: center;
+        }
+        .breath-count {
+          position: absolute; inset: 0; display: grid; place-items: center; z-index: 2;
+          font-size: 46px; font-weight: 800; color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,0.18);
+          animation: fadeIn 0.25s ease; pointer-events: none;
+        }
+        .organic-figure.holding { animation: breathHold 2s ease-in-out infinite; }
+        @keyframes breathHold {
+          0%, 100% { box-shadow: 0 4px 30px rgba(112,130,56,0.2); }
+          50% { box-shadow: 0 4px 44px rgba(112,130,56,0.45); }
+        }
+        .breath-label { display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 52px; }
+        .breath-phase { font-size: 24px; font-weight: 800; color: var(--text); animation: fadeIn 0.3s ease; }
         .breath-cycle { font-size: 12px; color: var(--text-soft); font-weight: 500; }
 
         .audio-toggle {
