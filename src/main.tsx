@@ -18,7 +18,8 @@ if ('serviceWorker' in navigator && !Capacitor.isNativePlatform()) {
 
 // Vercel Web Analytics: cuenta visitas a la web sin cookies. Solo en el sitio
 // publicado; la app nativa no tiene esa ruta. El componente toma la ruta única
-// del proyecto de VITE_VERCEL_OBSERVABILITY_BASEPATH, que Vercel define al compilar.
+// del proyecto de VITE_VERCEL_OBSERVABILITY_BASEPATH, que Vercel define al compilar;
+// la versión React del paquete no la lee sola, por eso se pasa explícitamente.
 const trackWebVisits = !Capacitor.isNativePlatform() && location.hostname.endsWith('vercel.app');
 
 createRoot(document.getElementById('root')!).render(
@@ -30,7 +31,12 @@ createRoot(document.getElementById('root')!).render(
         </AuthProvider>
         <UpdateNotice />
         <InstallPrompt />
-        {trackWebVisits && <Analytics />}
+        {trackWebVisits && (
+          <Analytics
+            basePath={import.meta.env.VITE_VERCEL_OBSERVABILITY_BASEPATH}
+            configString={import.meta.env.VITE_VERCEL_OBSERVABILITY_CLIENT_CONFIG}
+          />
+        )}
       </ErrorBoundary>
     </LanguageProvider>
   </StrictMode>
