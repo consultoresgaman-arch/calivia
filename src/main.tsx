@@ -15,6 +15,17 @@ if ('serviceWorker' in navigator && !Capacitor.isNativePlatform()) {
   });
 }
 
+// Vercel Web Analytics: cuenta visitas a la web sin cookies. Solo en el sitio
+// publicado; la app nativa no tiene la ruta /_vercel.
+if (!Capacitor.isNativePlatform() && location.hostname.endsWith('vercel.app')) {
+  const w = window as Window & { va?: (...args: unknown[]) => void; vaq?: unknown[] };
+  w.va = w.va || ((...args: unknown[]) => { (w.vaq = w.vaq || []).push(args); });
+  const script = document.createElement('script');
+  script.defer = true;
+  script.src = '/_vercel/insights/script.js';
+  document.head.appendChild(script);
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LanguageProvider>
